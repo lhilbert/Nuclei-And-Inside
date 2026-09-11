@@ -8,6 +8,27 @@ Original pipeline: [https://github.com/lhilbert/VisitorGene_PseudoTime](https://
 
 ---
 
+## New to Git and GitHub?
+
+You don't need prior experience to contribute.
+
+- **No GitHub account yet?** [Create one](https://docs.github.com/en/get-started/start-your-journey/creating-an-account-on-github),
+  then work through GitHub's
+  [Hello World quickstart](https://docs.github.com/en/get-started/start-your-journey/hello-world)
+  (~15 min, entirely in the browser).
+- **Learning Git itself:** the Carpentries'
+  [Version Control with Git](https://swcarpentry.github.io/git-novice/)
+  lesson is written for researchers and assumes no background.
+- **Prefer a graphical client?** We recommend
+  [GitHub Desktop](https://docs.github.com/en/desktop) or the Source Control
+  panel in VS Code.
+- **Why we work this way:** see the version control chapter of
+  [The Turing Way](https://book.the-turing-way.org/reproducible-research/vcs).
+
+Questions are welcome — open an issue rather than getting stuck.
+
+---
+
 ## Install
 
 ```bash
