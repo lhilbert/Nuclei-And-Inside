@@ -3,15 +3,8 @@ Repository to support co-development of microscopy image analysis of nuclei as w
 
 3D nucleus segmentation and per-nucleus quantification for Nikon `.nd2` z-stacks.
 
-Python port of the lab MATLAB pipeline (`PseudoTimeCourse_CroppedImages.m`
-+ `otsuLimit.m`), with a watershed split for touching nuclei and a boundary-refinement step that the MATLAB version does not have.
-
-Validated on two datasets: vt-iSIM fixed zebrafish embryos (JF646-Hoechst) and cultured cells (DAPI, drug conditions).
-
-You can download one of these data sets from the following, publicly shared Zenodo repository. The analysis should run fine on these data.
-
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.5242952.svg)](https://doi.org/10.5281/zenodo.5242952)
-
+Python port of the lab MATLAB pipeline (`PseudoTimeCourse_CroppedImages.m` + `otsuLimit.m`), with a watershed split for touching nuclei and a boundary-refinement step that the MATLAB version does not have.
+Original pipeline: [https://github.com/lhilbert/VisitorGene_PseudoTime](https://github.com/lhilbert/VisitorGene_PseudoTime)
 
 ---
 
@@ -23,8 +16,19 @@ conda activate nucleus3d
 pip install -e .
 ```
 
-Dependencies: `nd2`, `numpy`, `scipy`, `scikit-image`, `pandas`,
-`tifffile`, `matplotlib`.
+Dependencies: `nd2`, `numpy`, `scipy`, `scikit-image`, `pandas`, `tifffile`, `matplotlib`.
+
+---
+
+## Example data and code validation
+
+Validated on two datasets: vt-iSIM fixed zebrafish embryos (JF646-Hoechst) and cultured cells (DAPI, drug conditions).
+
+You can download one of these data sets from the following, publicly shared Zenodo repository. The analysis should run fine on these data.
+
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.5242952.svg)](https://doi.org/10.5281/zenodo.5242952)
+
+
 
 ---
 
