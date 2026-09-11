@@ -8,6 +8,11 @@ Python port of the lab MATLAB pipeline (`PseudoTimeCourse_CroppedImages.m`
 
 Validated on two datasets: vt-iSIM fixed zebrafish embryos (JF646-Hoechst) and cultured cells (DAPI, drug conditions).
 
+You can download one of these data sets from the following, publicly shared Zenodo repository. The analysis should run fine on these data.
+
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.5242952.svg)](https://doi.org/10.5281/zenodo.5242952)
+
+
 ---
 
 ## Install
