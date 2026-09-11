@@ -31,10 +31,27 @@ Questions are welcome — open an issue rather than getting stuck.
 
 ## Install
 
+### Conda
+
 ```bash
 conda create -n nucleus3d python=3.11
 conda activate nucleus3d
 pip install -e .
+```
+
+### uv
+
+`uv` creates and manages a project-local virtual environment in `.venv`:
+
+```bash
+uv sync
+source .venv/bin/activate
+```
+
+The `uv sync` command installs the package in editable mode and records the resolved dependencies in `uv.lock`. To run commands without activating the environment, prefix them with `uv run`, for example:
+
+```bash
+uv run python run_analysis.py
 ```
 
 Dependencies: `nd2`, `numpy`, `scipy`, `scikit-image`, `pandas`, `tifffile`, `matplotlib`.
