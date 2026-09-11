@@ -31,31 +31,68 @@ Questions are welcome — open an issue rather than getting stuck.
 
 ## Install
 
-### Conda
+To manage Python dependencies for a single project (think: additional functions
+needed only for this project), it is highly recommended that you use a virtual
+environment manager.
 
-```bash
-conda create -n nucleus3d python=3.11
-conda activate nucleus3d
-pip install -e .
-```
+Below are the commands for either `uv` or Conda. Both work — you only need one.
+We recommend `uv`.
 
-### uv
+### Option A — uv (recommended)
+
+Install `uv`: https://docs.astral.sh/uv/getting-started/installation/
 
 `uv` creates and manages a project-local virtual environment in `.venv`:
 
 ```bash
+git clone https://github.com/<org>/nucleus3d.git
+cd nucleus3d
 uv sync
-source .venv/bin/activate
 ```
 
-The `uv sync` command installs the package in editable mode and records the resolved dependencies in `uv.lock`. To run commands without activating the environment, prefix them with `uv run`, for example:
+`uv sync` installs the package in editable mode and records the resolved
+dependency versions in `uv.lock`, so everyone working on the project gets an
+identical environment.
+
+You do not need to activate anything — prefix commands with `uv run`:
 
 ```bash
 uv run python run_analysis.py
 ```
 
-Dependencies: `nd2`, `numpy`, `scipy`, `scikit-image`, `pandas`, `tifffile`, `matplotlib`.
+If you prefer an activated shell (e.g. for an interactive interpreter):
 
+```bash
+source .venv/bin/activate      # macOS / Linux
+.venv\Scripts\activate         # Windows
+```
+
+### Option B — Conda (fallback)
+
+Use this if you need packages that are awkward to install via pip on your
+platform, or if your group already standardises on Conda.
+
+Install Miniforge: https://github.com/conda-forge/miniforge#install
+
+We recommend Miniforge over Anaconda or Miniconda: it provides the same `conda`
+command, comes preconfigured for the free conda-forge channel, and avoids the
+Anaconda Terms of Service, which can require a paid licence for institutional
+use.
+
+```bash
+git clone https://github.com/<org>/nucleus3d.git
+cd nucleus3d
+conda create -n nucleus3d python=3.11
+conda activate nucleus3d
+pip install -e .
+```
+
+Note that this path does not use `uv.lock`, so dependency versions are resolved
+fresh at install time and may differ from those used during development.
+
+### Dependencies
+
+`nd2`, `numpy`, `scipy`, `scikit-image`, `pandas`, `tifffile`, `matplotlib`
 ---
 
 ## Example data and code validation
