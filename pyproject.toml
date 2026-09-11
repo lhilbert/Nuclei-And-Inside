@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nucleus3d"
+version = "1.0.0"
+description = "3D nucleus segmentation and quantification for Nikon .nd2 z-stacks"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "nd2>=0.7",
+    "numpy>=1.23",
+    "scipy>=1.9",
+    "scikit-image>=0.20",
+    "pandas>=1.5",
+    "tifffile>=2023.1.1",
+    "matplotlib>=3.6",
+]
+
+[tool.setuptools.packages.find]
+include = ["nucleus3d*"]
