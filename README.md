@@ -48,7 +48,7 @@ uv sync
 source .venv/bin/activate
 ```
 
-The `uv sync` command installs the package in editable mode and records the resolved dependencies in `uv.lock`. To run commands without activating the environment, prefix them with `uv run`, for example:
+The `uv sync` command installs the package in editable mode and records the resolved dependencies in `uv.lock`. The interpreter version is pinned by the tracked `.python-version` file (currently 3.11, matching `requires-python` in `pyproject.toml`), and `uv` downloads and manages that interpreter itself on first sync — you do not need a system-wide Python installation, and the version you get does not depend on which `python3` happens to be on your PATH. To run commands without activating the environment, prefix them with `uv run`, for example:
 
 ```bash
 uv run python run_analysis.py
