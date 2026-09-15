@@ -145,7 +145,7 @@ def export_nucleus_boxes(stack, labels, outdir, pad_um=1.0, include_mask=True,
         mask_crop = labels[:, y0:y1, x0:x1] == r.label
 
         uid = nucleus_uid(stack, r.label)
-        fname = f"{uid}.ome.tif".replace("#", "_")
+        fname = f"{uid}.ome.tif"
         path = os.path.join(outdir, fname)
 
         provenance = {
