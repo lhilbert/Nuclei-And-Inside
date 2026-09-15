@@ -1,0 +1,9 @@
+# This folder is meant to be copied into another repository, so it carries its own.
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+# Default output location of run_analysis.py
+results/

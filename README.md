@@ -105,7 +105,9 @@ named after the subfolder.
 **3. Look at the QC figures** in `<output>/qc/` before you use the table. Not optional here —
 see "Reading the QC figure".
 
-**4. If you have a probe-absent control, run the acceptance test.**
+**4. If you have a probe-absent control, run the acceptance test** — it is the only check here
+that distinguishes a working detector from a confidently broken one, and on the data these
+defaults come from it **fails**. See *Things that will bite you*.
 
 ```bash
 python run_acceptance.py
