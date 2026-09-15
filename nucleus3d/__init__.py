@@ -1,38 +1,33 @@
 """
-nucleus3d -- 3D nucleus segmentation and quantification for Nikon .nd2 stacks.
+nucleus3d -- 3D nucleus segmentation and per-nucleus quantification for
+Nikon .nd2 z-stacks, plus the analysis of the resulting tables.
 
-Typical use is through the template script (`run_analysis.py`); import the
-package directly when you want to work field by field:
+The package is in two halves that meet only at the measurement table:
 
-    from nucleus3d import load_field, describe_file, SegParams, segment_nuclei
+    nucleus3d.core       images -> nuclei_measurements.csv  (+ optional
+                         per-nucleus substacks)
+    nucleus3d.analysis   nuclei_measurements.csv -> figures
 
-    print(describe_file("field.nd2")["channels"])     # confirm the DNA channel
-    stack = load_field("field.nd2", position=0)
-    labels, props = segment_nuclei(stack.channel("DAPI"), stack.voxel_um)
+Run them as two steps, via the templates in `scripts/`:
 
-Module map
-    io        reading .nd2 files             -> Stack
-    segment   segmentation                   -> labels, props
-    quantify  per-nucleus intensities        -> DataFrame
-    export    3D OME-TIFF crops per nucleus  -> files + index
-    validate  per-field QC figures           -> figure + QC numbers
-    pipeline  the batch driver tying it together
+    python scripts/run_segmentation.py     # step 1, hours
+    python scripts/run_analysis.py         # step 2, seconds
+
+Only the handful of names below are re-exported here -- the entry point of
+each half, its parameter object, and the figure functions. Everything else
+is reachable through the subpackage it lives in
+(`from nucleus3d.core.quantify import midplane_metrics`), which keeps the
+top-level namespace readable and makes the import say which half a function
+belongs to.
 """
 
-__version__ = "1.0.0"
-
-from .io import Stack, load_field, iter_fields, describe_file, n_positions
-from .segment import SegParams, segment_nuclei, otsu_limit
-from .quantify import quantify_nuclei, background_level, nucleus_uid
-from .export import export_nucleus_boxes, read_box_provenance
-from .validate import validation_figure, unsegmented_fraction
-from .pipeline import run, process_field, find_nd2
+from .core import SegParams, run
+from .core.io import load_field, describe_file
+from .analysis import (feature_pca, midplane_scatter, zclip_diagnostics,
+                       nucleus_gallery, nucleus_mosaic, pca_summary)
 
 __all__ = [
-    "Stack", "load_field", "iter_fields", "describe_file", "n_positions",
-    "SegParams", "segment_nuclei", "otsu_limit",
-    "quantify_nuclei", "background_level", "nucleus_uid",
-    "export_nucleus_boxes", "read_box_provenance",
-    "validation_figure", "unsegmented_fraction",
-    "run", "process_field", "find_nd2",
+    "SegParams", "run", "load_field", "describe_file",
+    "feature_pca", "midplane_scatter", "zclip_diagnostics",
+    "nucleus_gallery", "nucleus_mosaic", "pca_summary",
 ]

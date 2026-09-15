@@ -19,12 +19,10 @@ Each figure has five panels:
 
 import os
 
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt           # noqa: E402
-import numpy as np                        # noqa: E402
-from scipy import ndimage as ndi          # noqa: E402
-from skimage.filters import gaussian, threshold_otsu   # noqa: E402
+import matplotlib.pyplot as plt
+import numpy as np
+from scipy import ndimage as ndi
+from skimage.filters import gaussian, threshold_otsu
 from skimage.measure import label as sklabel, regionprops  # noqa: E402
 from skimage.segmentation import find_boundaries       # noqa: E402
 

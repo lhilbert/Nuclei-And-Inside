@@ -17,6 +17,7 @@ Output tree
 """
 
 import glob
+import hashlib
 import json
 import os
 import time
@@ -29,7 +30,7 @@ import pandas as pd
 from . import io as n3io
 from .segment import SegParams, segment_nuclei
 from .quantify import quantify_nuclei
-from .export import export_nucleus_boxes
+from .export import export_nucleus_boxes, params_fingerprint
 from .validate import validation_figure
 
 
@@ -53,15 +54,113 @@ def condition_from_path(path, root):
     return "root" if rel in (".", "") else rel.replace(os.sep, "/")
 
 
+def code_fingerprint():
+    """
+    Short hash of the source that determines a measurement table.
+
+    Cached results must not survive an edit to the code that produced them,
+    and this project has no release cadence to hang a version number on, so
+    the fingerprint is taken over the modules themselves. Editing a metric
+    in `quantify.py` or a threshold default in `segment.py` therefore
+    invalidates every cached field automatically.
+    """
+    h = hashlib.sha1()
+    here = os.path.dirname(os.path.abspath(__file__))
+    for name in ("segment.py", "quantify.py", "io.py"):
+        with open(os.path.join(here, name), "rb") as fh:
+            h.update(fh.read())
+    return h.hexdigest()[:16]
+
+
+def field_cache_key(stack, dna_channel, params, min_blob_um3):
+    """Identity of a field's measurement table: inputs, settings, code."""
+    try:
+        st = os.stat(stack.source_path)
+        src = (int(st.st_size), int(st.st_mtime))
+    except OSError:
+        src = (-1, -1)
+    payload = (os.path.abspath(stack.source_path), src, int(stack.position),
+               dna_channel, float(min_blob_um3),
+               params_fingerprint(params), code_fingerprint())
+    return hashlib.sha1(repr(payload).encode()).hexdigest()[:16]
+
+
+def _write_cache(path, df):
+    """
+    Write a cached measurement table that reads back bit-identical.
+
+    Two details are needed for that, and neither is the default.
+
+    `%.17g` is the shortest decimal form guaranteed to round-trip float64;
+    pandas' default repr is shorter and loses the last bits.
+
+    The column dtypes go in a sidecar, because CSV carries no schema: a
+    column of whole-valued floats (a median of integer pixel values, say)
+    comes back as int64, and concatenating such a cached field with a
+    freshly computed one would then produce object columns. The sidecar is
+    JSON so a stale cache stays inspectable by eye.
+    """
+    df.to_csv(path, index=False, float_format="%.17g")
+    with open(path + ".schema.json", "w") as fh:
+        json.dump({c: str(t) for c, t in df.dtypes.items()}, fh, indent=1)
+
+
+def _read_cache(path):
+    """
+    Read a cached table back, or None if it cannot be trusted.
+
+    `float_precision="round_trip"` selects the correctly-rounded parser;
+    pandas' default C parser is fast but not exact, which silently
+    introduces differences of order 1e-14 -- small, but enough that a
+    cached run stops being reproducible.
+
+    A cache is disposable by construction, so any problem here is a miss
+    rather than an error: the field is simply re-segmented.
+    """
+    try:
+        df = pd.read_csv(path, float_precision="round_trip")
+        schema_path = path + ".schema.json"
+        if os.path.exists(schema_path):
+            with open(schema_path) as fh:
+                df = df.astype(json.load(fh))
+        return df
+    except Exception:                                         # noqa: BLE001
+        return None
+
+
 def process_field(stack, dna_channel, params, outdir, save_qc=True,
                   save_boxes=False, box_pad_um=1.0, box_include_mask=True,
-                  extra_columns=None, min_blob_um3=5.0):
+                  extra_columns=None, min_blob_um3=5.0, reuse_boxes=True,
+                  cache_dir=None):
     """
     Segment, quantify and (optionally) export one field.
 
     Returns (measurements, box_index, field_qc) -- any of which may be None
     or empty when the field contains no nuclei.
+
+    With `cache_dir`, the measurement table is written there under a key
+    covering the source file (path, size, mtime), the stage position, the
+    DNA channel, the segmentation parameters AND a hash of the module
+    sources, and is read back instead of re-segmenting on a later run. This
+    is what makes a resumed or repeated run cheap: segmentation is ~38 s per
+    field against ~0.4 s for the box export, so reusing boxes alone saves
+    almost nothing.
+
+    The cache is bypassed whenever `save_qc` or `save_boxes` is set, because
+    both need the label image, which is not cached -- only the table is.
     """
+    cache_path = None
+    if cache_dir and not (save_qc or save_boxes):
+        key = field_cache_key(stack, dna_channel, params, min_blob_um3)
+        os.makedirs(cache_dir, exist_ok=True)
+        cache_path = os.path.join(
+            cache_dir,
+            f"{stack.name.replace('#', '_').replace('.nd2', '')}__{key}.csv")
+        if os.path.exists(cache_path):
+            cached = _read_cache(cache_path)
+            if cached is not None:
+                return cached, pd.DataFrame(), None
+
     vol = stack.channel(dna_channel)
     labels, props = segment_nuclei(vol, stack.voxel_um, params)
 
@@ -82,7 +181,7 @@ def process_field(stack, dna_channel, params, outdir, save_qc=True,
         boxes = export_nucleus_boxes(
             stack, labels, os.path.join(outdir, "nucleus_boxes"),
             pad_um=box_pad_um, include_mask=box_include_mask,
-            extra_columns=extra_columns,
+            extra_columns=extra_columns, params=params, reuse=reuse_boxes,
         )
 
     qc = None
@@ -94,13 +193,18 @@ def process_field(stack, dna_channel, params, outdir, save_qc=True,
         if extra_columns:
             qc.update(extra_columns)
 
+    if cache_path is not None:
+        # written last, so an interrupted field leaves no cache entry
+        _write_cache(cache_path, meas)
+
     return meas, boxes, qc
 
 
 def run(input_dir, outdir, dna_channel, params=None, positions=None,
         recursive=True, save_qc=True, save_boxes=False, box_pad_um=1.0,
         box_include_mask=True, label_conditions=True, min_blob_um3=5.0,
-        verbose=True):
+        n_workers=1, max_workers=None, memory_fraction=0.75,
+        reuse_boxes=True, use_cache=True, verbose=True):
     """
     Run the full pipeline over a folder of .nd2 files.
 
@@ -116,6 +220,12 @@ def run(input_dir, outdir, dna_channel, params=None, positions=None,
     positions : list of stage-position indices, or None for all of them
     save_boxes : write one 3D OME-TIFF per nucleus
     label_conditions : add a `condition` column from the parent folder name
+    n_workers : 1 for serial (default), an integer for a fixed pool, or
+                "auto" to size the pool from measured memory use. Peak RAM
+                per field is several GB, so "auto" is usually far below the
+                core count -- see nucleus3d.parallel.
+    max_workers : hard cap on the pool when n_workers="auto"
+    memory_fraction : share of available RAM "auto" is allowed to spend
 
     Returns
     -------
@@ -123,6 +233,8 @@ def run(input_dir, outdir, dna_channel, params=None, positions=None,
     """
     p = params or SegParams()
     os.makedirs(outdir, exist_ok=True)
+    cache_dir = (os.path.join(outdir, "field_cache")
+                 if use_cache and not (save_qc or save_boxes) else None)
 
     paths = find_nd2(input_dir, recursive)
     if not paths:
@@ -141,10 +253,40 @@ def run(input_dir, outdir, dna_channel, params=None, positions=None,
 
     meas_all, box_all, qc_all, failures = [], [], [], []
     t0 = time.time()
+    parallel_plan = None
 
-    for k, (fp, pos) in enumerate(jobs, 1):
-        extra = ({"condition": condition_from_path(fp, input_dir)}
-                 if label_conditions and os.path.isdir(input_dir) else None)
+    def _extra_for(fp):
+        return ({"condition": condition_from_path(fp, input_dir)}
+                if label_conditions and os.path.isdir(input_dir) else None)
+
+    if n_workers != 1:
+        from .parallel import run_parallel
+
+        results, parallel_plan = run_parallel(
+            jobs, dna_channel, p, outdir, save_qc=save_qc,
+            save_boxes=save_boxes, box_pad_um=box_pad_um,
+            box_include_mask=box_include_mask, min_blob_um3=min_blob_um3,
+            extra_for=_extra_for, n_workers=n_workers,
+            max_workers=max_workers, memory_fraction=memory_fraction,
+            reuse_boxes=reuse_boxes, cache_dir=cache_dir, verbose=verbose)
+
+        for res in results:
+            if not res["ok"]:
+                failures.append(res["failure"])
+                continue
+            if res["meas"] is not None and len(res["meas"]):
+                meas_all.append(res["meas"])
+            if res["boxes"] is not None and len(res["boxes"]):
+                box_all.append(res["boxes"])
+            if res["qc"]:
+                qc_all.append(res["qc"])
+
+        jobs_iter = []                    # the loop below has nothing left to do
+    else:
+        jobs_iter = list(enumerate(jobs, 1))
+
+    for k, (fp, pos) in jobs_iter:
+        extra = _extra_for(fp)
         try:
             stack = n3io.load_field(fp, pos)
             if dna_channel not in stack.channels and isinstance(dna_channel, str):
@@ -154,7 +296,8 @@ def run(input_dir, outdir, dna_channel, params=None, positions=None,
                 stack, dna_channel, p, outdir, save_qc=save_qc,
                 save_boxes=save_boxes, box_pad_um=box_pad_um,
                 box_include_mask=box_include_mask, extra_columns=extra,
-                min_blob_um3=min_blob_um3)
+                min_blob_um3=min_blob_um3, reuse_boxes=reuse_boxes,
+                cache_dir=cache_dir)
 
             if len(meas):
                 meas_all.append(meas)
@@ -201,6 +344,7 @@ def run(input_dir, outdir, dna_channel, params=None, positions=None,
                        box_include_mask=box_include_mask,
                        n_files=len(paths), n_fields=len(jobs),
                        n_failed=len(failures),
+                       n_workers=n_workers, parallel_plan=parallel_plan,
                        n_nuclei=int(len(table)),
                        elapsed_s=round(time.time() - t0, 1),
                        seg_params=asdict(p)), fh, indent=2)

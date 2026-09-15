@@ -1,13 +1,24 @@
 #!/usr/bin/env python
 """
 =============================================================================
- ANALYSIS TEMPLATE -- copy this file per experiment, edit the block below,
- and run it. Nothing outside the SETTINGS block needs to change.
+ STEP 1 of 2 -- images to tables.  Copy this file per experiment, edit the
+ SETTINGS block, and run it. Nothing outside that block needs to change.
 =============================================================================
 
-    python run_analysis.py
+    python scripts/run_segmentation.py        # hours; then step 2:
+    python scripts/run_analysis.py            # seconds
 
-Before the first run on a NEW dataset, check the channel names:
+Segments every field, quantifies every nucleus, and writes
+
+    <OUTPUT_DIR>/nuclei_measurements.csv      one row per nucleus
+    <OUTPUT_DIR>/field_summary.csv            one row per field
+    <OUTPUT_DIR>/run_parameters.json          settings + worker plan
+    <OUTPUT_DIR>/qc/*.png                     per-field validation figures
+    <OUTPUT_DIR>/nucleus_boxes/*.ome.tif      one substack per nucleus (OPT-IN)
+    <OUTPUT_DIR>/nucleus_boxes_index.csv      substack index, by nucleus_uid
+
+Before the first run on a NEW dataset, check the channel names -- the folder
+name is not evidence of what is in the file:
 
     python -c "from nucleus3d import describe_file; print(describe_file('yourfile.nd2'))"
 
@@ -18,9 +29,12 @@ Then look at the QC figures in <OUTPUT_DIR>/qc/ before trusting the table.
 import os
 import sys
 
-# Work whether or not the package has been pip-installed: put this file's
-# own folder on the import path, so a copied repository runs as-is.
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import matplotlib
+matplotlib.use("Agg")        # headless: the library does not set this for you
+
+# Work whether or not the package has been pip-installed: put the repository
+# root on the import path, so a fresh clone runs as-is.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from nucleus3d import SegParams, run          # noqa: E402
 
@@ -51,13 +65,46 @@ POSITIONS = None
 """Stage positions to process: None for all, or e.g. [0, 5, 10] to test
 parameters quickly before committing to a full run."""
 
+N_WORKERS = "auto"
+"""
+Fields to process at once: 1 for serial, an integer, or "auto".
+
+"auto" is memory-driven, not core-driven, and the difference is large.
+Segmenting one 31 x 716 x 794 field peaks near 3 GB, so what limits the
+pool is how much RAM is FREE, not how many cores exist. "auto" measures the
+real peak on the first field, in an isolated subprocess, and sizes the pool
+from that measurement.
+"""
+
+MAX_WORKERS = None
+"""Hard cap on the pool, e.g. 4 to leave the machine usable. None = no cap."""
+
+MEMORY_FRACTION = 0.75
+"""Share of currently-available RAM the pool may claim. Lower it if you
+want to keep working while a run is going."""
+
 # --- outputs ------------------------------------------------------------
 SAVE_QC_FIGURES = True
 """One five-panel validation figure per field. Keep on."""
 
 SAVE_NUCLEUS_BOXES = False
-"""Write one 3D OME-TIFF per nucleus (all channels + mask). Off by default:
-it is the slow, disk-hungry part -- roughly 1-3 MB per nucleus."""
+"""
+Write one 3D OME-TIFF substack per nucleus -- all channels, plus the
+segmentation mask as an extra channel. OPT-IN, because it is the
+disk-hungry part: roughly 1-3 MB per nucleus, so ~1-2 GB for a dataset of
+800.
+
+They land in <OUTPUT_DIR>/nucleus_boxes/, named
+<file>_p<position>_nuc<label>.ome.tif (e.g.
+SetC_Control_004_crop_p00_nuc001.ome.tif, ~3 MB each on the example data),
+and <OUTPUT_DIR>/nucleus_boxes_index.csv indexes them by `nucleus_uid` --
+the same key as in nuclei_measurements.csv, so the two join directly. Each file carries its own provenance (source file,
+position, label, bounding box in source coordinates) in the OME
+description; read it with nucleus3d.core.export.read_box_provenance.
+
+On a re-run, a substack whose provenance and mask still match what would
+be written is left alone rather than rewritten (reuse_boxes=True).
+"""
 
 BOX_PAD_UM = 1.0             # lateral margin around each nucleus
 BOX_INCLUDE_MASK = True      # append the segmentation mask as a channel
@@ -105,9 +152,19 @@ def main():
         save_boxes=SAVE_NUCLEUS_BOXES,
         box_pad_um=BOX_PAD_UM,
         box_include_mask=BOX_INCLUDE_MASK,
+        n_workers=N_WORKERS,
+        max_workers=MAX_WORKERS,
+        memory_fraction=MEMORY_FRACTION,
     )
 
     table = out["measurements"]
+    n_fields = len(out["field_summary"])
+    print(f"\n{len(table)} nuclei from {n_fields} fields "
+          f"-> {os.path.join(OUTPUT_DIR, 'nuclei_measurements.csv')}")
+    if SAVE_NUCLEUS_BOXES:
+        print(f"substacks -> {os.path.join(OUTPUT_DIR, 'nucleus_boxes')}/ "
+              f"(indexed by nucleus_boxes.csv)")
+
     if len(table) and "condition" in table.columns:
         print("\nper condition:")
         print(table.groupby("condition").agg(
@@ -116,6 +173,8 @@ def main():
             median_area_um2=("max_area_um2", "median"),
             median_volume_um3=("volume_um3", "median"),
         ).round(2).to_string())
+
+    print("\nNext: check <OUTPUT_DIR>/qc/ , then run scripts/run_analysis.py")
 
 
 if __name__ == "__main__":

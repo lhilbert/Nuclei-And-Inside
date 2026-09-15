@@ -218,3 +218,17 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 .DS_Store
+
+# Analysis output. `results/` is the default OUTPUT_DIR of the templates in
+# scripts/, so without this a single run would offer the whole thing --
+# measurement tables, QC figures, the field cache, and gigabytes of
+# per-nucleus substacks -- to the next `git add -A`. Results are data, not
+# source: they are reproducible from the .nd2 files plus run_parameters.json.
+results/
+results_*/
+*.ome.tif
+nuclei_measurements.csv
+field_summary.csv
+run_parameters.json
+field_cache/
+nucleus_boxes/
