@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """TEMPLATE. Copy this, edit the SETTINGS block, run it. Nothing below SETTINGS needs changing.
 
-    python run_analysis.py
+    python scripts/run_antennas.py
 
 Before your first run on a new dataset:
 

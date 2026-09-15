@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""TEMPLATE. The probe-absent control test. Run it on an output tree run_analysis.py produced.
+"""TEMPLATE. The probe-absent control test. Run it on an output tree run_antennas.py produced.
 
     python run_acceptance.py
 
@@ -8,7 +8,7 @@ absent reporter - the correct length density there is zero. This measures whethe
 agrees. It is the only test here that can distinguish a working detector from a confidently
 broken one, and it is worth acquiring such a control in order to be able to run it.
 
-It needs `keep_work="small"` or `"full"` in run_analysis.py, because it RE-TRACES from the
+It needs `keep_work="small"` or `"full"` in run_antennas.py, because it RE-TRACES from the
 stored binary at each `min_branch_um` rather than filtering edges - pruning a spur changes the
 topology, so a shorter minimum branch is not the same graph with more edges kept.
 
@@ -16,7 +16,7 @@ topology, so a shorter minimum branch is not the same graph with more edges kept
 antennas. See the README.
 """
 from antenna3d import run_acceptance
-from run_analysis import OUTPUT_DIR, PARAMS
+from run_antennas import OUTPUT_DIR, PARAMS
 
 # ============================================================================== SETTINGS =====
 

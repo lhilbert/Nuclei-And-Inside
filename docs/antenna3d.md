@@ -103,11 +103,11 @@ python -c "from antenna3d import describe_file; print(describe_file('yourfile.nd
       2  'RFP'  632 nm
 ```
 
-**2. Copy `run_analysis.py`**, edit the `SETTINGS` block — input folder, output folder, the two
+**2. Copy `scripts/run_antennas.py`**, edit the `SETTINGS` block — input folder, output folder, the two
 channel **names**, the voxel size, the PSF, and `LABELS_DIR` — and run it:
 
 ```bash
-python run_analysis.py
+python scripts/run_antennas.py
 ```
 
 Put files in per-treatment subfolders of the input folder and a `condition` column appears,
@@ -155,11 +155,11 @@ antenna3d/
     validate.py     per-field QC figure, per-nucleus trace overlay, QC numbers
     acceptance.py   the probe-absent control test
     pipeline.py     batch driver: walks files/fields/nuclei, writes the output tree
-run_analysis.py     TEMPLATE -- the only file you normally edit
-run_acceptance.py   TEMPLATE -- the control test
+scripts/run_antennas.py    TEMPLATE -- the only file you normally edit
+scripts/run_acceptance.py  TEMPLATE -- the control test
 ```
 
-The split is deliberate and is the same one `nucleus3d` uses: **`run_analysis.py` holds
+The split is deliberate and is the same one `nucleus3d` uses: **`run_antennas.py` holds
 parameters and no logic; the modules hold logic and no parameters.** One addition here —
 `params.py` holds the defaults and the reason each one has the value it does, so a parameter's
 justification lives next to the parameter rather than in a paper you no longer have.
@@ -333,7 +333,7 @@ A length density cannot tell you the tracer is following the rim of a blob; this
 > phantom, freeze the value, and use it for every condition. Tuning per condition is fitting the
 > result, and it is undetectable in the output.
 
-`UPPER_CASE` names are in `run_analysis.py`'s SETTINGS block. `lower_case` names are fields of
+`UPPER_CASE` names are in `scripts/run_antennas.py`'s SETTINGS block. `lower_case` names are fields of
 the `params.py` dataclasses; set them by replacing the block:
 
 ```python

@@ -1,6 +1,7 @@
 """Every parameter in the pipeline, in one place.
 
-`run_analysis.py` holds parameters and no logic; the modules hold logic and no parameters. This
+The `scripts/run_*.py` templates hold parameters and no logic; the modules hold logic and
+no parameters. This
 module is the hinge between them: five frozen dataclasses, each field carrying the measurement
 or the decision that set its default.
 
