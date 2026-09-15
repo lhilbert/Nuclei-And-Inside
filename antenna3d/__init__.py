@@ -11,7 +11,8 @@ The output is not an image. It is `graphs/<nucleus_uid>.graphml`, `antenna_edges
 
 **Read `run_acceptance.py` before you quote a number.** See the README.
 """
-from .acceptance import run_acceptance, summarise as summarise_acceptance
+from .acceptance import (per_field as acceptance_per_field, run_acceptance,
+                         summarise as summarise_acceptance)
 from .enhance import centerline_nms, frangi_3d, noise_null
 from .graph import build_graph, edge_rows, nucleus_row
 from .grid import Grid, sample_um
@@ -31,7 +32,7 @@ from .validate import field_figure, field_summary, trace_overlay
 __version__ = "0.1.0"
 
 __all__ = [
-    "Channels", "Crop", "DetectParams", "E1_100X_FROZEN", "Field", "FieldRef", "Grid",
+    "acceptance_per_field", "Channels", "Crop", "DetectParams", "E1_100X_FROZEN", "Field", "FieldRef", "Grid",
     "GraphParams", "IngestError", "Nucleus", "Optics", "PSF", "Params", "SamplingError",
     "SegParams", "TraceParams", "WIDEFIELD_100X", "binarize", "boundary_surface",
     "build_filaments", "build_graph", "centerline_nms", "describe_file", "destripe_plane",

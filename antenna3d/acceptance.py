@@ -115,6 +115,24 @@ def summarise(per_nuc: pd.DataFrame, positive: str, negative: str) -> pd.DataFra
     return pd.DataFrame(out).sort_values("min_branch_um")
 
 
+def per_field(per_nuc: pd.DataFrame, at_min_branch: float) -> pd.DataFrame:
+    """The same test broken out by field. **Read this beside the curve.**
+
+    The curve pools nuclei across fields and treats them as independent, and per-field variation
+    is large: on the data these defaults come from, median density across three fields of the
+    SAME condition spanned 0.0366 to 0.5581, a 15x range. So an effect size computed over pooled
+    nuclei is overconfident, and one computed from a single field per arm can come out with the
+    wrong SIGN. `detect_neg` is the robust part of the verdict; the effect size is not.
+    """
+    g = per_nuc[per_nuc.min_branch_um == at_min_branch]
+    out = (g.groupby(["condition", "field_id"])
+           .agg(n=("nucleus_uid", "size"), detected=("detected", "mean"),
+                density_med=("length_density_um_per_um3", "median"),
+                total_length_med_um=("total_length_um", "median"))
+           .reset_index().sort_values(["condition", "field_id"]))
+    return out
+
+
 def run_acceptance(output_dir, positive: str, negative: str, params=None,
                    grid_um=DEFAULT_GRID, log=print) -> dict:
     """The whole test over an output tree that `run_folder` produced.
@@ -149,12 +167,22 @@ def run_acceptance(output_dir, positive: str, negative: str, params=None,
 
     pn = per_nucleus(work, nuclei, params, grid_um, log=log)
     s = summarise(pn, positive, negative)
+    mid = sorted(grid_um)[len(grid_um) // 2]
+    pf = per_field(pn, mid)
     pn.to_csv(out / "acceptance_per_nucleus.csv", index=False)
     s.to_csv(out / "acceptance.csv", index=False)
+    pf.to_csv(out / "acceptance_per_field.csv", index=False)
 
     worst = float(s.detect_neg.max())
     verdict = "PASSES" if worst == 0.0 else "FAILS"
     log("\n" + s.to_string(index=False, float_format=lambda v: f"{v:.4f}"))
+    log(f"\nper field, at min_branch_um = {mid:g}:")
+    log(pf.to_string(index=False, float_format=lambda v: f"{v:.4f}"))
+    n_fields = pf.groupby("condition").field_id.nunique()
+    if int(n_fields.min()) < 2:
+        log(f"\n  NOTE: {int(n_fields.min())} field(s) in one arm. `detect_neg` is still "
+            f"meaningful,\n  but the effect size is not - per-field variation within one "
+            f"condition spans\n  more than 10x on this assay, and it can invert the sign.")
     log(f"\nVERDICT: {verdict}")
     if verdict == "FAILS":
         r = s.loc[s.min_branch_um.idxmax()]
@@ -163,4 +191,4 @@ def run_acceptance(output_dir, positive: str, negative: str, params=None,
         log(f"  Even at min_branch_um = {r.min_branch_um:g} it is {100 * r.detect_neg:.0f}%.")
         log(f"  No per-nucleus number in this output tree is quotable as biology.")
         log(f"  Look at qc/traces/*{negative}* - that is where the cause is visible.")
-    return {"curve": s, "per_nucleus": pn, "verdict": verdict}
+    return {"curve": s, "per_nucleus": pn, "per_field": pf, "verdict": verdict}

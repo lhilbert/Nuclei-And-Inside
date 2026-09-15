@@ -54,8 +54,19 @@ oblique filament of known length inside a spherical nucleus, at the measured wid
 `pytest` recovers its length to **1.03×** truth and traces it as **one** component.
 
 **Real widefield 100× HA-K-actin whole-mount sphere data.** Two fields — one reporter-positive
-and one **reporter-negative** — were run end to end through graphs, tables and QC while this
-package was written, against masks produced elsewhere.
+and one **reporter-negative**, 37 nuclei, 11 750 edges — were run end to end through graphs,
+tables and QC while this package was written, against masks produced elsewhere. Independently of
+the research pipeline, on different masks and a different subsample, it lands on the same
+per-edge geometry:
+
+| | research pipeline, 363 nuclei | this package, 37 nuclei |
+|---|---|---|
+| median edge length, pos / neg | 0.757 / 0.739 µm | 0.763 / 0.746 µm |
+| p90 edge length, pos / neg | 1.728 / 1.500 µm | 1.691 / 1.556 µm |
+| median tortuosity, pos / neg | 1.035 / 1.022 | 1.035 / 1.009 |
+| median intensity CV, pos / neg | 0.471 / 0.642 | 0.489 / 0.645 |
+| control `separation` | 280 | 277 |
+| acceptance `detect_neg` | 1.000 | 1.000 |
 
 Be clear about what that does and does not establish. It shows the code path works on real
 `.nd2` data and reproduces the control behaviour described under "Things that will bite you".
@@ -391,6 +402,12 @@ Hessian), reached the same verdict on the same control.
 **So: run `run_acceptance.py` on your own probe-absent control before you quote anything, and
 open `qc/traces/` for the control nuclei.** If you have no such control, this package cannot
 tell you whether its output is real, and neither can you. That is worth an acquisition.
+
+**And read `acceptance_per_field.csv` beside the curve.** The curve pools nuclei across fields
+and treats them as independent, which they are not. Median density across three fields of the
+*same* condition spanned **0.0366 to 0.5581** on this assay — a 15× range — so a pooled effect
+size is overconfident, and one computed from a single field per arm can come out with the wrong
+**sign**. `detect_neg` is the robust part of the verdict; the effect size is not.
 
 **The channel name is not the stain.** Check with `describe_file` on every new dataset. One
 dataset in this project stores actin at index **2** and another at index **0** — same

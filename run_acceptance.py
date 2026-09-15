@@ -31,4 +31,5 @@ MIN_BRANCH_GRID = (0.25, 0.5, 1.0, 2.0)
 
 if __name__ == "__main__":
     run_acceptance(OUTPUT_DIR, POSITIVE, NEGATIVE, PARAMS, grid_um=MIN_BRANCH_GRID)
-    print(f"\nWritten: {OUTPUT_DIR}/acceptance.csv and acceptance_per_nucleus.csv")
+    print(f"\nWritten: {OUTPUT_DIR}/acceptance.csv, acceptance_per_field.csv "
+          f"and acceptance_per_nucleus.csv")

@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from antenna3d.acceptance import mannwhitney, run_acceptance, summarise
+from antenna3d.acceptance import mannwhitney, per_field, run_acceptance, summarise
 
 
 def curve(pos_density, neg_density, mb=0.5):
@@ -86,3 +86,23 @@ def test_it_refuses_to_report_a_verdict_with_no_control(tmp_path):
     df.to_csv(tmp_path / "antenna_nuclei.csv", index=False)
     with pytest.raises(ValueError, match="not in antenna_nuclei"):
         run_acceptance(tmp_path, "probe", "no-probe")
+
+
+def test_per_field_breaks_the_pooled_statistic_out():
+    """The curve pools nuclei across fields; per-field variation on this assay spans >10x."""
+    rows = []
+    for f, (cond, dens) in enumerate([("probe", 0.04), ("probe", 0.55),
+                                      ("no-probe", 0.10), ("no-probe", 0.12)]):
+        for i in range(8):
+            rows.append({"nucleus_uid": f"f{f}n{i}", "field_id": f"field{f}",
+                         "condition": cond, "min_branch_um": 0.5,
+                         "length_density_um_per_um3": dens, "total_length_um": dens * 300,
+                         "detected": True})
+    pf = per_field(pd.DataFrame(rows), 0.5)
+    assert len(pf) == 4
+    probe = pf[pf.condition == "probe"].density_med
+    assert probe.max() / probe.min() > 10, "the spread within one condition must be visible"
+    # Pooled, this arm's median sits between its two fields and looks like one number.
+    pooled = summarise(pd.DataFrame(rows), "probe", "no-probe").iloc[0]
+    assert pooled.density_pos_med not in set(probe), (
+        "the pooled median is not any field's median - which is the point of reporting both")
