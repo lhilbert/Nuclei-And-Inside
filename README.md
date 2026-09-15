@@ -22,6 +22,28 @@ Step 1 needs the image data and a lot of RAM; step 2 needs only the table
 long segmentation run happens once, and the analysis can then be iterated
 in seconds -- on a different machine if you like.
 
+And a second pipeline, for the structures **inside** those nuclei:
+
+```
+ .nd2 z-stacks ─────────────────────────┐
+                                        │  antenna3d
+ <output>/labels/*.tif  ────────────────┴─────────> one graph per nucleus
+ (step 1's masks)                                   antenna_nuclei.csv
+                                                    antenna_edges.csv
+```
+
+`antenna3d` traces nuclear F-actin **antennas** and returns them as a graph
+per nucleus rather than an image. It does not segment nuclei -- it takes
+step 1's label volumes, and every row it writes carries the same
+`nucleus_uid`, so the two tables join. See
+[Antennas](#antennas-the-structures-inside-the-nuclei) and
+[Running both](#running-the-nuclei-and-the-antennas-together).
+
+**The two do not accept the same data.** `antenna3d` declares an optical
+regime and refuses a file whose voxel size disagrees, so `nucleus3d` will
+happily process stacks it correctly declines. See
+[Things that will bite you](#things-that-will-bite-you).
+
 ## New to Git and GitHub?
 
 You don't need prior experience to contribute.
@@ -104,7 +126,27 @@ fresh at install time and may differ from those used during development.
 
 ### Dependencies
 
-`nd2`, `numpy`, `scipy`, `scikit-image`, `pandas`, `tifffile`, `matplotlib`
+`nd2`, `numpy`, `scipy`, `scikit-image`, `pandas`, `tifffile`, `matplotlib`,
+`networkx`, `skan`
+
+`networkx` and `skan` belong to `antenna3d` alone. Optional extras, which
+the normal path needs none of:
+
+```bash
+uv sync --extra parquet      # parquet beside the antenna CSVs; the edge table is ~10x smaller
+uv sync --extra cellpose     # ONLY if you want antenna3d to segment nuclei itself
+```
+
+`cellpose` and `torch` stay out of the default install and are imported only
+if you ask `antenna3d` to segment. In this toolbox it takes step 1's labels
+instead, so neither is ever needed.
+
+### Check it worked
+
+```bash
+uv run pytest
+```
+
 ---
 
 ## Example data and code validation
@@ -136,10 +178,36 @@ nucleus3d/
         plots.py       point figures: scatter, slab diagnostic, PCA summary
         mosaic.py      image figures: gallery, mosaic
         style.py       shared palette and font sizes
+antenna3d/         the second pipeline: structures inside the nuclei
+    grid.py        THE micron <-> voxel converter. Nothing else converts.
+    optics.py      the PSF, and the ten scales derived from it
+    params.py      every parameter, in five frozen dataclasses
+    io.py          .nd2 -> Field (channels BY NAME)
+    segment.py     bring-your-own labels | cellpose; boundary mesh
+    preprocess.py  destripe, flatten inside the mask, estimate the noise
+    enhance.py     3D Frangi with gamma in noise units; across-ridge NMS
+    trace.py       hysteresis -> NMS -> skeletonize -> prune
+    reconnect.py   junction merging, crossing resolution, gap joining
+    graph.py       the per-nucleus graph, and the two tidy tables
+    validate.py    QC figures and per-nucleus trace overlays
+    acceptance.py  the probe-absent control test
+    pipeline.py    the driver: run_folder(), run_field()
+combine.py         the join between the two pipelines' tables
 scripts/
     run_segmentation.py   step 1 template -- copy per experiment, edit, run
     run_analysis.py       step 2 template
+    run_antennas.py       antenna3d template
+    run_combined.py       both pipelines, then the join
+    run_acceptance.py     the antenna probe-absent control test
 ```
+
+`antenna3d` is a **sibling package, not a third nucleus3d subpackage**. It
+has its own optics model, its own parameter block and its own test suite,
+and it was written to stay usable on its own with masks from anywhere.
+`core` and `analysis` meet at the measurement table; `antenna3d` meets
+`nucleus3d` at the label volume and at `nucleus_uid`, which is a different
+seam. `combine.py` holds that join and sits outside both packages, so
+neither has to import the other.
 
 **The import direction is the contract:** `analysis` imports from `core`,
 and `core` never imports from `analysis`. That is what lets step 1 run on a
@@ -181,9 +249,28 @@ What it writes into `OUTPUT_DIR`:
 | `field_summary.csv` | one row per field: nuclei found, unsegmented fraction |
 | `run_parameters.json` | every setting used, plus the worker plan |
 | `qc/*.png` | per-field validation figures -- look at these before trusting the table |
+| `labels/*.tif` | per-field label volumes -- **the handoff to `antenna3d`** |
 | `field_cache/` | per-field tables for fast re-runs (see below) |
 | `nucleus_boxes/` | per-nucleus substacks, **only if you ask for them** |
 | `failures.csv` | fields that errored, if any |
+
+### Label volumes — the handoff
+
+`labels/<stem>_p<NN>.tif` is one compressed integer volume per field,
+carrying the voxel size in its OME metadata. It is what `antenna3d` reads
+from its `LABELS_DIR`, and a label volume without its spacing is not a
+measurement -- `antenna3d` refuses one rather than guessing, because
+guessing rescales every volume it then reports.
+
+On by default (`SAVE_LABEL_VOLUMES`), because it is cheap and it is the only
+output that makes the second pipeline runnable. It is written even for a
+field that segmented to nothing, so that an **empty** label volume means
+"nothing here" and a **missing** one means the handoff broke.
+
+One consequence worth knowing: **it disables the measurement cache.** The
+cache stores the table, not the label image, so a cached field returns
+before segmentation runs and there would be no labels to write. Set
+`SAVE_LABEL_VOLUMES = False` to get cached re-runs of the table alone.
 
 ### Per-nucleus substacks (optional)
 
@@ -306,11 +393,17 @@ thing. Segmentation is **~38 s per field**; exporting that field's nucleus
 boxes is **~0.4 s**. Reusing boxes alone therefore saves almost nothing —
 what makes a repeated or resumed run cheap is not re-segmenting.
 
-**The field cache** (`use_cache=True`, on by default when `save_qc` and
-`save_boxes` are both off) writes each field's measurement table under
+**The field cache** (`use_cache=True`, on by default when `save_qc`,
+`save_boxes` and `save_labels` are all off) writes each field's measurement
+table under
 `<outdir>/field_cache/` and reads it back instead of re-segmenting. Measured
 on two fields: 85 s cold, 0.53 s warm, and the returned table is
 *bit-identical* to the freshly computed one.
+
+All three of those settings need the label image, which is not cached --
+only the table is. `SAVE_LABEL_VOLUMES` defaults to **on**, so a plain run
+does not use the field cache; turn it off when you want a cached re-run of
+the table alone.
 
 The cache key covers everything that can change the numbers: the source
 file's path, size and mtime, the stage position, the DNA channel,
@@ -753,6 +846,169 @@ Two consequences for analysis of this dataset:
 1. Prefer the ratio metrics (`*_cv*`, solidity, `*_radial_norm`, enrichment) for anything compared across files, and treat `*_mean_corr` / `*_integrated_corr` as within-session quantities.
 2. `Flavopiridol` was imaged only in `SetC`, so condition and session are partly confounded. Compare it against the `SetC` controls, not the pooled ones. Doing that, its chromatin-contrast effect holds: CV 0.274 → 0.405 (p = 4e-09), PC1 −2.05 → +2.18 (p = 2e-09), mid-plane solidity 0.983 → 0.971 (p = 0.02).
 
+## Antennas: the structures inside the nuclei
+
+Nuclear F-actin **antenna** networks, as **one graph per nucleus**.
+Per-nucleus 3D ridge detection, centreline tracing, explicit crossing
+resolution and graph construction, for HA-K-actin-stained (or equivalent
+F-actin-reporting) nuclei.
+
+**The output is not an image.** It is `graphs/<nucleus_uid>.graphml`, plus a
+per-edge and a per-nucleus table that go straight into statistics.
+
+> **The full reference is [`docs/antenna3d.md`](docs/antenna3d.md)** — the
+> measurements behind every default, the bake-offs that chose each tool, and
+> the caveats in full. What follows is the short form. Read the long one
+> before you publish anything from it.
+
+```bash
+python -c "from antenna3d import describe_file; print(describe_file('yourfile.nd2'))"
+python scripts/run_antennas.py
+```
+
+Edit the `SETTINGS` block: the two channel **names**, the voxel size, the
+PSF, and `LABELS_DIR` — which points at step 1's `labels/` folder.
+[`run_combined.py`](#running-the-nuclei-and-the-antennas-together) fills that
+in for you.
+
+What it writes into its output folder:
+
+| file | contents |
+|---|---|
+| `graphs/<nucleus_uid>.graphml` | **the deliverable**, one per nucleus |
+| `antenna_nuclei.csv` | one row per nucleus |
+| `antenna_edges.csv` | one row per traced edge |
+| `field_summary.csv` | one row per field: QC numbers |
+| `run_parameters.json` | every parameter, plus the resolved scales |
+| `qc/*.png`, `qc/traces/*.png` | per-field figures, and one overlay per nucleus |
+| `work/` | bit-packed binary, ~30 kB per nucleus — what the control test re-traces from |
+| `skipped_files.csv` | files not in this optical regime, if any |
+| `failures.csv` | fields that errored, if any |
+
+### The three densities, each naming its denominator
+
+| column | denominator | when to use it |
+|---|---|---|
+| `length_density_um_per_um3` | `nucleus_volume_um3` | the default |
+| `length_density_um_per_um2_surface` | **`nucleus_surface_um2_true`** | when antennas are envelope-anchored |
+| `antennas_per_um3` | `nucleus_volume_um3` | counts rather than length |
+
+**Never report a total.** A nucleus here is 250–900 µm³ of imaged volume, so
+`total_antenna_length_um` is mostly a statement about how big the nucleus
+was.
+
+`nucleus_surface_um2_true` has a trap removed from it: the marching-cubes
+surface of a nucleus cut in z includes a **manufactured flat lid** where the
+mesh was closed — measured at 42.5% of the reported surface on a cut
+nucleus, and 0.00 µm² on one that is not.
+
+### Reading the QC figure
+
+Five panels per field, of which **panel 2 is the one that matters**: nuclei
+in cyan, traced centrelines in yellow. Is what it traced a filament? Dense
+yellow scribbles inside a nucleus are not antennas; they are the rims of
+bright puncta. `qc/traces/<nucleus_uid>.png` gives the same for one nucleus
+at full resolution — **open a few.** A length density cannot tell you the
+tracer is following the rim of a blob; this can.
+
+### Tuning
+
+> **No threshold is ever re-tuned per condition.** Every threshold here is a
+> multiple of the response of **pure noise at the same parameters**, which is
+> what makes one frozen value mean the same thing on a bright nucleus and a
+> faint one. Tune on a control or a phantom, freeze the value, and use it for
+> every condition. Tuning per condition is fitting the result, and it is
+> undetectable in the output.
+
+| Symptom | Parameter | Direction |
+|---|---|---|
+| dim filaments missed | `HIGH_K` | lower (2.0–3.0) |
+| noise speckle traced | `HIGH_K`, `detect.min_object_voxels` | raise |
+| one filament broken into pieces | `trace.max_gap_um` | raise — but see `docs/antenna3d.md` |
+| unrelated filaments joined together | `trace.max_angle_deg` | lower |
+| puncta rims traced as loops | `trace.max_loop_perimeter_um`, `trace.max_loop_area_um2` | raise |
+| short spurs everywhere | `MIN_BRANCH_UM` | raise, and report a curve |
+| run is too slow | `MEASURE_WIDTH = False` | — |
+
+### The control test
+
+```bash
+python scripts/run_acceptance.py
+```
+
+If you have a control with **no probe** in it — not a vehicle control, an
+actual absent reporter — the correct length density there is zero, and this
+measures whether the detector agrees. It is the only check here that
+distinguishes a working detector from a confidently broken one.
+
+**On the data this package was built from, it fails.** See
+[Things that will bite you](#things-that-will-bite-you).
+
+---
+
+## Running the nuclei and the antennas together
+
+```bash
+python scripts/run_combined.py
+```
+
+Runs step 1, hands its label volumes to `antenna3d`, and joins the two
+tables:
+
+```
+results/
+    nuclei/                        a full step-1 output tree
+        nuclei_measurements.csv
+        labels/<stem>_p00.tif      <- the handoff
+        qc/
+    antennas/                      a full antenna3d output tree
+        antenna_nuclei.csv
+        antenna_edges.csv
+        graphs/<nucleus_uid>.graphml
+        qc/traces/
+    nuclei_and_antennas.csv        one row per nucleus both pipelines measured
+```
+
+The two trees are separate because both pipelines write a
+`field_summary.csv`, a `run_parameters.json` and a `failures.csv`. Pointed at
+one folder they would overwrite each other.
+
+Set `STOP_AFTER_SEGMENTATION = True` on a new dataset. Stage 2 is the long
+half, and there is no point spending it on masks nobody has looked at.
+
+### The join
+
+```python
+from combine import join_nuclei_and_antennas
+both = join_nuclei_and_antennas("results/nuclei", "results/antennas")
+```
+
+A `merge(on="nucleus_uid")` with the checks that make it worth trusting. It
+**raises** rather than returning an empty frame when no id matches — that is
+what a drifted id looks like, and it is otherwise indistinguishable from a
+dataset in which nothing was detected. It also refuses a duplicated id, and
+disagreement on `label` or `position` under a shared id.
+
+`file`, `condition` and `source_path` are suffixed `_nucleus` / `_antenna`
+rather than collapsed: `file` is a basename with its extension on one side
+and a stem on the other.
+
+**Fewer joined rows than nucleus rows is correct, not a bug.** The two gate
+differently on purpose: `antenna3d` takes 100–4000 µm³ and drops nuclei
+touching an xy edge, because a nucleus cut laterally has no usable
+denominator; step 1 takes anything over 15 µm³ and keeps border nuclei,
+because a slab volume is not a nuclear volume. The join prints the
+reconciliation. Measured on two real fields: 42 nucleus rows → 37 pass the
+volume gate → 22 survive the border filter, and `n_antenna_only` is 0.
+
+### Running them separately
+
+There is no requirement to use `run_combined.py`. `run_segmentation.py` and
+`run_antennas.py` do the two halves independently; point `LABELS_DIR` at the
+former's `labels/` folder and the join works the same.
+
+---
+
 ## Things that will bite you
 
 **The channel name is not the stain.** Check with `describe_file` on every new dataset. One dataset in this project is named `...JF646Hoechst...` and contains no Hoechst channel — the DNA stain is on `Cy5`. Another has no DNA channel at all, and the corresponding MATLAB script sets `NucSegChannel = S5P_SegChannel`, i.e. it segments nuclei from the Pol II signal because there is nothing else. A wrong channel produces a full, confident, meaningless table.
@@ -768,3 +1024,76 @@ rest. Panel 3 of the QC figure is what catches this.
 mitotic figures.
 
 **A "clean" missed-nucleus check can be wrong.** During development the first version of this check thresholded at the 99th percentile, found only bright objects, and reported zero missed nuclei while two dim ones sat unsegmented. The QC figure is what exposed it. `unsegmented_fraction` now uses Otsu and dilates the masks by 0.5 µm so boundary halo does not drown the signal.
+
+### Across the two pipelines
+
+**The two pipelines do not accept the same data.** `antenna3d` declares an
+optical regime and refuses a file whose voxel size disagrees, because
+everything scale-like in it derives from the PSF. At iSIM sampling
+(0.1265 µm FWHM, 1.94 samples per FWHM) the PSF-matched lateral Hessian
+scale is **0.826 native pixels**, where a Gaussian derivative is not a
+derivative — the kernel is narrower than the sample spacing — and
+`Optics.scales()` raises `SamplingError` rather than running it. One of
+`nucleus3d`'s two validation datasets is vt-iSIM. **`nucleus3d` runs happily
+on data `antenna3d` correctly declines**, and that is a bug in neither. Run
+`scripts/run_segmentation.py` alone for those.
+
+**The reporter-negative control reports antennas.** On 13 fields of
+HA-K-actin whole-mount spheres with a reporter-**negative** arm — same
+embryos, same session, same imaging, no actin construct, so the correct
+length density is **zero** — **66 of 66 control nuclei reported antennas.**
+The traced objects are geometrically indistinguishable between the arms. The
+cause is the one thing single-scale ridge detection cannot help with: a blob
+much wider than the analysis scale presents its shoulder as a locally
+cylindrical surface, which *is* a ridge at that scale. **Run
+`scripts/run_acceptance.py` on your own probe-absent control before you
+quote anything**, and open `qc/traces/` for the control nuclei. If you have
+no such control, this toolbox cannot tell you whether the antenna output is
+real, and neither can you. That is worth an acquisition.
+
+**A condition is a folder name, and nothing parses it.** Both pipelines
+derive `condition` from the immediate parent subfolder, so they agree
+*provided both are pointed at the same input root* — and
+`run_acceptance.py` keys its arms off exactly that column. In this project's
+own data `LatB_009` and `LatA_004` are the **same compound**, latrunculin B
+in embryos B and A, and there is no latrunculin A in the dataset at all.
+Treating the trailing letter as a drug manufactures a drug comparison out of
+one condition imaged twice, and treating nuclei as independent replicates
+when the true n is *two embryos* overstates every p-value. Group on
+`condition` yourself, with the design in front of you.
+
+**`nucleus_uid` maps forward only.** Build it from
+`(file stem, position, label)`; never parse one back out of a path. A stem
+can itself contain the separator — in this project's own data a field named
+`..._sphere_postfix__crop` has a doubled underscore — and inverting the
+encoding once silently dropped **24 of 80** control nuclei, a fifth of the
+arm, with no error. Every table carries `file`, `position` and `label` as
+their own columns so you never need to.
+
+**Both packages export a `SegParams` and a `describe_file`, and they are
+different objects.** Different fields, different return shapes. In any
+script that touches both, import them qualified — `import nucleus3d as n3`,
+`import antenna3d as a3` — as `run_combined.py` does. A
+`from ... import *` binds one name to the other package's object and nothing
+errors.
+
+**Masks get cut in z by the segmentation, not only by the slab, and it does
+not look wrong.** `axial_edge_fraction` in the antenna table is the
+model-free covariate: 0 when the mask tapers away to nothing, 1 when it is
+cut at its widest. On data that is *not* axially truncated by its
+acquisition, 2D-per-plane segmentation measured a median of **0.8764**,
+against **0.0548** for a 3D flow field over the same fields — every density
+divided by a volume roughly 23% too small. `nucleus3d` segments in 3D and
+scores 0.087 on a phantom, **but on real 100× sphere data its masks scored
+0.90–1.00 on five of six traced nuclei.** Check the column and panel 4 on
+any real dataset before you believe a density.
+
+**Segmentation at native 100× sampling is impractical.** A 2280×2588×123
+field is 726 M voxels, and the coarse DoG arm runs at σ = 217 px laterally:
+measured, **~24 min per field** for the DoG alone, with the process reaching
+18.8 GB and swapping on a 23 GB machine. `plan_workers` does not help — it
+would allocate one worker for a field that size. Segmenting a 5× laterally
+binned stack (0.23 µm, the grid `antenna3d` uses itself, and which its
+`bin_factor` path already accepts) takes **~0.3 min** and 0.12 GB, and a
+nucleus is still 35 px across. The toolbox does not yet offer that as a
+setting; see the open issue.

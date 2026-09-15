@@ -1,5 +1,10 @@
 # antenna3d
 
+> This is the antenna pipeline's own reference, kept whole from the standalone package it was
+> extracted from. It is the long form: the measurements behind every default, the bake-offs that
+> chose each tool, and the caveats in full. The [repository README](../README.md) is the short
+> form and the place to start.
+
 Nuclear F-actin **antenna** networks from Nikon `.nd2` z-stacks, as **one graph per nucleus**.
 
 Per-nucleus 3D ridge detection, centreline tracing, explicit crossing resolution and graph
@@ -9,8 +14,10 @@ construction, for HA-K-actin-stained (or equivalent F-actin-reporting) whole-mou
 per-nucleus table that goes straight into downstream statistics.
 
 Nucleus segmentation is deliberately not this package's job — bring masks from
-[`nucleus3d`](../nucleus3d) or anywhere else. `nucleus_uid` uses `nucleus3d`'s exact format, so
-the two tables join on it.
+[`nucleus3d`](../README.md#step-1--from-images-to-tables), the sibling package in this
+repository, or from anywhere else. `nucleus_uid` is built from the same three parts on both
+sides, so the two tables join on it; `scripts/run_combined.py` runs the two in order and does
+the join for you.
 
 ---
 
@@ -22,18 +29,14 @@ See the repository root README — everything there applies here.
 
 ## Install
 
-```bash
-conda create -n antenna3d python=3.11
-conda activate antenna3d
-pip install -e .
-```
+One install covers the whole toolbox — see [the repository README](../README.md#install).
+`uv sync`, or `pip install -e .`, and both packages are importable.
 
 Optional extras:
 
 ```bash
-pip install -e ".[parquet]"    # parquet beside the CSVs; the edge table is ~10x smaller
-pip install -e ".[cellpose]"   # ONLY if you want this package to segment nuclei itself
-pip install -e ".[test]"       # pytest
+uv sync --extra parquet      # parquet beside the CSVs; the edge table is ~10x smaller
+uv sync --extra cellpose     # ONLY if you want this package to segment nuclei itself
 ```
 
 ### Dependencies
@@ -41,7 +44,7 @@ pip install -e ".[test]"       # pytest
 `nd2`, `numpy`, `scipy`, `scikit-image`, `networkx`, `skan`, `pandas`, `tifffile`, `matplotlib`.
 
 `cellpose` and `torch` are **optional** and are imported only if you ask this package to
-segment. The intended path supplies masks you already have, and then neither is installed.
+segment. In this toolbox the masks come from `nucleus3d`, so neither is ever installed.
 
 ---
 
@@ -195,11 +198,13 @@ Every row carries `nucleus_uid`, `file`, `position`, `field_id`, `label` and `so
 everything — and it is **the same format `nucleus3d` uses**, so:
 
 ```python
-import pandas as pd
-a = pd.read_csv("results/antenna_nuclei.csv")
-n = pd.read_csv("nucleus_results/nuclei_measurements.csv")
-both = a.merge(n, on="nucleus_uid")        # antennas + nuclear intensities, one row per nucleus
+from combine import join_nuclei_and_antennas
+both = join_nuclei_and_antennas("results/nuclei", "results/antennas")
 ```
+
+That is a `merge(on="nucleus_uid")` with the checks that make it safe to trust — see
+[Running both](../README.md#running-the-nuclei-and-the-antennas-together). The bare merge works
+too, but returns an empty frame rather than an error if the ids ever drift apart again.
 
 The same id is the GraphML filename stem:
 
@@ -474,8 +479,32 @@ design in front of you.
 
 ## Relationship to other pipelines
 
-- **`nucleus3d`** — the sibling in this repository: 3D nucleus segmentation and per-nucleus
-  quantification. Supply its labels to `LABELS_DIR` and join the two tables on `nucleus_uid`.
+- **`nucleus3d`** — the sibling in this repository: 3D nucleus segmentation, per-nucleus
+  quantification and table analysis. It writes a label volume per field into `<output>/labels`;
+  point `LABELS_DIR` at that folder, or just run `scripts/run_combined.py`, which wires the
+  handoff and the join. **The two do not accept the same data**: this package declares an
+  optical regime and refuses a file whose voxel size disagrees, so `nucleus3d` will process
+  stacks this one correctly declines.
 - **AntEnnA** — the research repository this package was extracted from. It keeps the full
   nine-stage form with per-stage manifests, three experiment descriptors and the append-only
   decision record behind every number quoted above.
+
+### Pulling a newer antenna3d from AntEnnA
+
+This package arrived here by `git subtree`, so its five extraction commits are part of this
+repository's history rather than a squashed import. The prefix was flattened afterwards — the
+package is at `antenna3d/`, its tests at `tests/antenna3d/`, its templates in `scripts/` — so a
+later update is a re-split and a merge, not a plain `git subtree pull`:
+
+```bash
+# in the AntEnnA checkout
+git subtree split --prefix=share/antenna3d -b antenna3d-export
+
+# here
+git fetch <antenna-remote> antenna3d-export
+git subtree add --prefix=vendor/antenna3d FETCH_HEAD    # lands whole, then move the parts
+```
+
+Worth weighing against the alternative each time: upstream changes to a package that has been
+adapted to this toolbox are rarely a clean apply, and reading the diff and porting it by hand is
+often less work than reconciling one.
