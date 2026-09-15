@@ -256,12 +256,32 @@ def block_reduce_mean(vol: np.ndarray, b: int) -> np.ndarray:
             .reshape(Z, Y // b, b, X // b, b).mean(axis=(2, 4)).astype(np.float32))
 
 
-def segment_nuclei_cellpose(dna: np.ndarray, native: Grid, params, log=print
-                            ) -> tuple[np.ndarray, Grid]:
-    """Cellpose on the DNA channel. Returns (labels, label grid).
+def label_grid_for(native: Grid, params) -> tuple[Grid, int]:
+    """(label grid, bin factor) for segmenting at `SegParams.nuclei_grid_um`."""
+    b = int(round(params.segment.nuclei_grid_um / native.dx_um))
+    return Grid(dz_um=native.dz_um, dy_um=native.dy_um * b, dx_um=native.dx_um * b), b
 
-    Optional dependency: `pip install antenna3d[cellpose]`. If you already have masks, use
-    `nuclei_from_labels` and none of this runs.
+
+def bin_planes(planes, b: int, n_planes: int) -> np.ndarray:
+    """Bin an iterable of (Y, X) planes by `b` in y and x, one plane at a time.
+
+    Plane by plane rather than volume-then-bin because the unbinned volume is the largest array
+    in the whole pipeline: a 169 x 2280 x 2588 uint16 field is 2.0 GB, against 160 MB binned.
+    Nothing needs the full-resolution DNA volume, so nothing should hold one.
+    """
+    out = None
+    for i, pl in enumerate(planes):
+        if i >= n_planes:
+            break
+        row = block_reduce_mean(np.asarray(pl)[None, ...], b)[0]
+        if out is None:
+            out = np.empty((n_planes,) + row.shape, np.float32)
+        out[i] = row
+    return out if out is not None else np.zeros((0, 0, 0), np.float32)
+
+
+def segment_binned(vol_binned: np.ndarray, lgrid: Grid, params, log=print) -> np.ndarray:
+    """Cellpose on an already-binned DNA volume. Returns a label volume.
 
     **`anisotropy` is required and is computed from the grid.** Without it cellpose treats a
     0.2 um z step as a 0.23 um lateral one, computes the flow field on the wrong geometry, and
@@ -273,12 +293,9 @@ def segment_nuclei_cellpose(dna: np.ndarray, native: Grid, params, log=print
         raise ImportError(
             "cellpose is not installed. Either `pip install antenna3d[cellpose]`, or - better - "
             "pass labels you already have to nuclei_from_labels().") from e
-
     seg = params.segment
-    b = int(round(seg.nuclei_grid_um / native.dx_um))
-    lgrid = Grid(dz_um=native.dz_um, dy_um=native.dy_um * b, dx_um=native.dx_um * b)
-    vol = normalise_for_cellpose(block_reduce_mean(dna, b))
-    log(f"      {vol.shape} at {lgrid.dx_um:.4f} um (bin {b}); segmenting")
+    vol = normalise_for_cellpose(vol_binned)
+    log(f"      {vol.shape} at {lgrid.dx_um:.4f} um; segmenting")
     model = models.CellposeModel(gpu=bool(seg.gpu))
     extra = dict(do_3D=True, anisotropy=lgrid.dz_um / lgrid.dy_um) if seg.do_3d else {}
     masks, _, _ = model.eval(
@@ -287,4 +304,15 @@ def segment_nuclei_cellpose(dna: np.ndarray, native: Grid, params, log=print
         cellprob_threshold=float(seg.cellprob_threshold),
         batch_size=8, normalize=False,      # done once above, over the whole volume
         **extra)
-    return np.asarray(masks).astype(np.uint16), lgrid
+    return np.asarray(masks).astype(np.uint16)
+
+
+def segment_nuclei_cellpose(dna: np.ndarray, native: Grid, params, log=print
+                            ) -> tuple[np.ndarray, Grid]:
+    """Cellpose on a full-resolution DNA volume. Returns (labels, label grid).
+
+    Optional dependency: `pip install antenna3d[cellpose]`. If you already have masks, use
+    `nuclei_from_labels` and none of this runs.
+    """
+    lgrid, b = label_grid_for(native, params)
+    return segment_binned(block_reduce_mean(dna, b), lgrid, params, log), lgrid

@@ -24,7 +24,7 @@ from .pipeline import load_work, run_field, run_folder
 from .preprocess import Crop, destripe_plane, flatten_in_mask, make_crop, noise_sd
 from .reconnect import build_filaments, end_tangent, join_gaps, pair_at_junction
 from .segment import (Nucleus, boundary_surface, labels_from_tiff, nuclei_from_labels,
-                      segment_nuclei_cellpose)
+                      segment_binned, segment_nuclei_cellpose)
 from .trace import binarize, path_length_um, polyline_length_um, resample_to, trace
 from .validate import field_figure, field_summary, trace_overlay
 
@@ -39,6 +39,7 @@ __all__ = [
     "join_gaps", "labels_from_tiff", "list_fields", "load_work", "make_crop", "noise_null",
     "noise_sd", "nuclei_from_labels", "nucleus_row", "nucleus_uid", "open_field",
     "pair_at_junction", "path_length_um", "polyline_length_um", "read_header", "resample_to", "run_acceptance",
-    "run_field", "run_folder", "sample_um", "scales_for", "segment_nuclei_cellpose",
+    "run_field", "run_folder", "sample_um", "scales_for", "segment_binned",
+    "segment_nuclei_cellpose",
     "summarise_acceptance", "theoretical", "trace", "trace_overlay",
 ]

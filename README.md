@@ -53,9 +53,17 @@ Validated two ways.
 oblique filament of known length inside a spherical nucleus, at the measured widefield PSF.
 `pytest` recovers its length to **1.03×** truth and traces it as **one** component.
 
-**Real widefield 100× HA-K-actin whole-mount sphere data**, 13 fields, 363 nuclei, including a
-**reporter-negative control**. That control is what the "Things that will bite you" section
-below is about, and it is the reason this package ships `run_acceptance.py`.
+**Real widefield 100× HA-K-actin whole-mount sphere data.** Two fields — one reporter-positive
+and one **reporter-negative** — were run end to end through graphs, tables and QC while this
+package was written, against masks produced elsewhere.
+
+Be clear about what that does and does not establish. It shows the code path works on real
+`.nd2` data and reproduces the control behaviour described under "Things that will bite you".
+**It is not an independent validation of the method.** Every measured number quoted in this
+README — the enhancer bake-off, the 4.35:1 detected cross-section, the acceptance-test verdict
+on 363 nuclei across 13 fields — comes from the research pipeline this package was extracted
+from, on that same dataset. Treat them as the provenance of the defaults, not as a claim that
+the method has been validated on yours.
 
 There is no public example dataset for this assay yet. `pytest` runs with no data at all; set
 `ANTENNA3D_TEST_ND2` to one of your own `.nd2` files to exercise the reader as well.

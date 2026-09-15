@@ -14,6 +14,7 @@ import time
 import traceback
 from pathlib import Path
 
+import networkx as nx
 import numpy as np
 import pandas as pd
 
@@ -24,7 +25,8 @@ from .io import FieldRef, list_fields, nucleus_uid, open_field
 from .params import Params
 from .preprocess import PlaneCache, Crop, crop_bounds, make_crop
 from .reconnect import build_filaments
-from .segment import labels_from_tiff, nuclei_from_labels, segment_nuclei_cellpose
+from .segment import (bin_planes, label_grid_for, labels_from_tiff, nuclei_from_labels,
+                      segment_binned)
 from .trace import binarize, trace
 
 WORK_SMALL, WORK_FULL, WORK_NONE = "small", "full", False
@@ -89,8 +91,12 @@ def _labels_for(ref: FieldRef, labels_dir, params, field, log):
         log(f"      labels from {hit.name}")
         return labels_from_tiff(hit)
     log("      no LABELS_DIR: segmenting with cellpose")
-    with_dna = field.volume("dna")
-    return segment_nuclei_cellpose(with_dna, field.grid, params, log=log)
+    lgrid, b = label_grid_for(field.grid, params)
+    n_z = field.shape[0]
+    # Binned as the planes arrive: the unbinned DNA volume is the largest array the pipeline
+    # would ever hold (2.0 GB on a field this size) and nothing needs it.
+    vol = bin_planes((field.plane(z, "dna") for z in range(n_z)), b, n_z)
+    return segment_binned(vol, lgrid, params, log=log), lgrid
 
 
 def run_field(ref: FieldRef, params: Params, out: Path, labels_dir=None,
@@ -150,7 +156,6 @@ def run_field(ref: FieldRef, params: Params, out: Path, labels_dir=None,
                 "threshold_low": thr["low"], "threshold_high": thr["high"],
                 "thinned_by_nms": thr["nms"],
             })
-            import networkx as nx
             nx.write_graphml(G, out / "graphs" / f"{n.nucleus_uid}.graphml")
             graphs.append(G)
             per_nucleus.append(nucleus_row(G))
