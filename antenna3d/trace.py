@@ -119,7 +119,7 @@ def resample_to(fg: np.ndarray, src: Grid, dst_spacing_um) -> tuple[np.ndarray, 
     isotropic in MICRONS, but that the STRUCTURE be isotropic in VOXELS.
 
     Measured on a phantom: after enhancement a filament's detected cross-section is 1.000 um in
-    z by 0.230 um in x - 4.35:1, exactly the PSF anisotropy. On a 0.092 um isotropic grid that
+    z by 0.230 um in x - 4.35:1, against a PSF anisotropy of 4:1. On a 0.092 um isotropic grid that
     is an 8 x 2 voxel RIBBON, and skeletonising a ribbon gives a centreline that wanders inside
     it: 7.86 um of skeleton with a spurious branch point for a 6.55 um filament, 20% too long,
     which then loses 3 um to spur pruning.

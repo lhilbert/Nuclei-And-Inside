@@ -3,6 +3,8 @@
 These four properties are what make one frozen threshold mean the same thing on a bright
 nucleus and a faint one. If any of them breaks, nothing downstream announces it.
 """
+from dataclasses import replace
+
 import numpy as np
 import pytest
 
@@ -121,8 +123,8 @@ def test_the_threshold_is_in_null_units_not_an_image_percentile():
     mask = np.ones((16, 64, 64), bool)
     null = 0.01
     empty = rng.uniform(0, null * 0.5, (16, 64, 64)).astype(np.float32)
-    fg, thr = binarize(empty, null, mask, p.with_(
-        detect=type(p.detect)(**{**p.detect.__dict__, "thin_by_nms": False})))
+    fg, thr = binarize(empty, null, mask,
+                       p.with_(detect=replace(p.detect, thin_by_nms=False)))
     assert fg.sum() == 0, "a response entirely below the null must yield NO foreground"
     assert thr["high"] == pytest.approx(p.detect.high_k * null)
     assert thr["low"] == pytest.approx(p.detect.low_k * null)

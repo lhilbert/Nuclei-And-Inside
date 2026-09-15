@@ -169,9 +169,9 @@ justification lives next to the parameter rather than in a paper you no longer h
     failures.csv              fields that errored                (if any)
 ```
 
-`work/` is what `run_acceptance.py` re-traces from. `KEEP_INTERMEDIATES = "full"` additionally
-stores the flattened actin (~9 MB per nucleus) which the acceptance table's branch-point columns
-need; `False` keeps nothing and disables the acceptance test.
+`work/` is what `run_acceptance.py` re-traces from. `KEEP_WORK = "full"` additionally stores the
+flattened actin (~9 MB per nucleus), which the acceptance table's branch-point columns need;
+`KEEP_WORK = False` keeps nothing and disables the acceptance test.
 
 **Check `failures.csv` does not exist before you read any table.**
 
@@ -275,7 +275,7 @@ two false tips and half the length each. On a one-voxel structure that error is 
 clDice and F1 — a broken filament scores 1.000 on both.
 
 The reason it wins is measurable: after enhancement a filament's detected cross-section is
-**4.35:1 in z**, exactly the PSF anisotropy. Skeletonising that ribbon finds a medial axis that
+**4.35:1 in z**, against a PSF anisotropy of 4:1. Skeletonising that ribbon finds a medial axis that
 wanders inside it; NMS takes the response maximum, which does not.
 
 ### The work grid is Nyquist-matched per axis, not isotropic in microns
@@ -320,14 +320,24 @@ A length density cannot tell you the tracer is following the rim of a blob; this
 > phantom, freeze the value, and use it for every condition. Tuning per condition is fitting the
 > result, and it is undetectable in the output.
 
+`UPPER_CASE` names are in `run_analysis.py`'s SETTINGS block. `lower_case` names are fields of
+the `params.py` dataclasses; set them by replacing the block:
+
+```python
+from dataclasses import replace
+PARAMS = PARAMS.with_(trace=replace(PARAMS.trace, max_angle_deg=25.0))
+```
+
 | Symptom | Parameter | Direction |
 |---|---|---|
 | dim filaments missed | `HIGH_K` | lower (2.0–3.0) |
-| noise speckle traced | `HIGH_K`, `min_object_voxels` | raise |
-| one filament broken into pieces | `max_gap_um` | raise — but see below |
-| unrelated filaments joined together | `max_angle_deg` | lower |
-| puncta rims traced as loops | `max_loop_perimeter_um`, `max_loop_area_um2` | raise |
+| noise speckle traced | `HIGH_K`, `detect.min_object_voxels` | raise |
+| one filament broken into pieces | `trace.max_gap_um` | raise — but see below |
+| unrelated filaments joined together | `trace.max_angle_deg` | lower |
+| puncta rims traced as loops | `trace.max_loop_perimeter_um`, `trace.max_loop_area_um2` | raise |
 | short spurs everywhere | `MIN_BRANCH_UM` | raise, and report a curve |
+| a diffuse background, not a flat one | `detect.background_sigma_um` | lower toward the object |
+| the noise estimate tracks the signal | `detect.noise_estimator` | `first_difference_x` |
 | skeleton wanders or self-branches | check the work grid is Nyquist-matched per axis | — |
 | run is too slow | `MEASURE_WIDTH = False` | — |
 

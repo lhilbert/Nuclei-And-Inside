@@ -55,6 +55,10 @@ class Nucleus:
     used: bool
     #: Set by the pipeline once the field is known: `<stem>_p<NN>_nuc<NNN>`.
     nucleus_uid: str = ""
+    #: The envelope mesh, in microns. EMPTY unless `nuclei_from_labels(..., keep_mesh=True)`:
+    #: `surface_um2_true` above needs marching cubes, but the vertex and face lists themselves
+    #: are read by nothing in this package and are ~70 kB per nucleus. Ask for them if you want
+    #: to render an envelope.
     vertices_um: list = _field(default_factory=list, repr=False)
     faces: list = _field(default_factory=list, repr=False)
 
@@ -151,12 +155,15 @@ def boundary_surface(mask: np.ndarray, grid: Grid, step: int = 2,
             "vertices": np.round(verts, 4).tolist(), "faces": faces.tolist()}
 
 
-def nuclei_from_labels(labels: np.ndarray, grid: Grid, params) -> list[Nucleus]:
+def nuclei_from_labels(labels: np.ndarray, grid: Grid, params,
+                       keep_mesh: bool = False) -> list[Nucleus]:
     """Turn a label volume into `Nucleus` records, applying the size and border gates.
 
     `grid` is the spacing of `labels`, in microns, as (z, y, x). **Get it right.** A label
     volume from another tool is usually at the spacing that tool worked at, and assuming native
     sampling for a binned label volume scales every volume by the bin factor cubed.
+
+    `keep_mesh=True` also returns each envelope's vertices and faces; see `Nucleus`.
     """
     seg = params.segment
     out: list[Nucleus] = []
@@ -190,7 +197,8 @@ def nuclei_from_labels(labels: np.ndarray, grid: Grid, params) -> list[Nucleus]:
             xy_border_touching=border, z_truncated=ztrunc,
             used=bool(not (border and seg.drop_xy_border_touching)
                       and not (ztrunc and seg.drop_z_truncated)),
-            vertices_um=surf["vertices"], faces=surf["faces"], **axial))
+            vertices_um=surf["vertices"] if keep_mesh else [],
+            faces=surf["faces"] if keep_mesh else [], **axial))
     return out
 
 
