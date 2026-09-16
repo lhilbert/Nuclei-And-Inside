@@ -14,6 +14,7 @@ Segments every field, quantifies every nucleus, and writes
     <OUTPUT_DIR>/field_summary.csv            one row per field
     <OUTPUT_DIR>/run_parameters.json          settings + worker plan
     <OUTPUT_DIR>/qc/*.png                     per-field validation figures
+    <OUTPUT_DIR>/labels/*.tif                 per-field label volumes
     <OUTPUT_DIR>/nucleus_boxes/*.ome.tif      one substack per nucleus (OPT-IN)
     <OUTPUT_DIR>/nucleus_boxes_index.csv      substack index, by nucleus_uid
 
@@ -23,6 +24,10 @@ name is not evidence of what is in the file:
     python -c "from nucleus3d import describe_file; print(describe_file('yourfile.nd2'))"
 
 Then look at the QC figures in <OUTPUT_DIR>/qc/ before trusting the table.
+
+To carry straight on into the structures inside those nuclei, run
+scripts/run_combined.py instead -- it runs this, hands its label volumes to
+antenna3d, and joins the two tables.
 =============================================================================
 """
 
@@ -87,6 +92,21 @@ want to keep working while a run is going."""
 SAVE_QC_FIGURES = True
 """One five-panel validation figure per field. Keep on."""
 
+SAVE_LABEL_VOLUMES = True
+"""
+Write one label volume per field to <OUTPUT_DIR>/labels.
+
+This is the handoff to the rest of the toolbox: point antenna3d's
+LABELS_DIR at that folder and it measures the structures inside these exact
+nuclei, with `nucleus_uid` joining the two tables. One small compressed
+integer volume per field -- far cheaper than the substacks below. Keep on.
+
+Note it disables the measurement cache, which stores only the table: a
+cached field returns before segmentation runs, and there would be no label
+image to write. Set it to False if you want a cached re-run of the table
+alone.
+"""
+
 SAVE_NUCLEUS_BOXES = False
 """
 Write one 3D OME-TIFF substack per nucleus -- all channels, plus the
@@ -150,6 +170,7 @@ def main():
         positions=POSITIONS,
         save_qc=SAVE_QC_FIGURES,
         save_boxes=SAVE_NUCLEUS_BOXES,
+        save_labels=SAVE_LABEL_VOLUMES,
         box_pad_um=BOX_PAD_UM,
         box_include_mask=BOX_INCLUDE_MASK,
         n_workers=N_WORKERS,
@@ -161,6 +182,9 @@ def main():
     n_fields = len(out["field_summary"])
     print(f"\n{len(table)} nuclei from {n_fields} fields "
           f"-> {os.path.join(OUTPUT_DIR, 'nuclei_measurements.csv')}")
+    if SAVE_LABEL_VOLUMES:
+        print(f"labels    -> {os.path.join(OUTPUT_DIR, 'labels')}/ "
+              f"(the antenna3d handoff)")
     if SAVE_NUCLEUS_BOXES:
         print(f"substacks -> {os.path.join(OUTPUT_DIR, 'nucleus_boxes')}/ "
               f"(indexed by nucleus_boxes.csv)")

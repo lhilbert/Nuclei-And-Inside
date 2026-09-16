@@ -228,6 +228,8 @@ results/
 results_*/
 *.ome.tif
 nuclei_measurements.csv
+antenna_nuclei.csv
+antenna_edges.csv
 field_summary.csv
 run_parameters.json
 field_cache/

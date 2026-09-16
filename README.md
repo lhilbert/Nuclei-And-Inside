@@ -22,6 +22,13 @@ Step 1 needs the image data and a lot of RAM; step 2 needs only the table
 long segmentation run happens once, and the analysis can then be iterated
 in seconds -- on a different machine if you like.
 
+A second, optional pipeline sits alongside these: `antenna3d` traces nuclear
+F-actin antennas and returns one graph per nucleus. It does not segment
+nuclei — it reads step 1's label volumes and joins on `nucleus_uid`. It is
+documented on its own in [`docs/antenna3d.md`](docs/antenna3d.md), and it is
+not part of the path above; see [the second
+pipeline](#the-second-pipeline-antennas).
+
 ## New to Git and GitHub?
 
 You don't need prior experience to contribute.
@@ -104,7 +111,19 @@ fresh at install time and may differ from those used during development.
 
 ### Dependencies
 
-`nd2`, `numpy`, `scipy`, `scikit-image`, `pandas`, `tifffile`, `matplotlib`
+`nd2`, `numpy`, `scipy`, `scikit-image`, `pandas`, `tifffile`, `matplotlib`,
+`networkx`, `skan`
+
+`networkx` and `skan` belong to `antenna3d` alone. It also has two optional
+extras, neither of which the normal path needs — see
+[`docs/antenna3d.md`](docs/antenna3d.md#install).
+
+### Check it worked
+
+```bash
+uv run pytest
+```
+
 ---
 
 ## Example data and code validation
@@ -136,10 +155,19 @@ nucleus3d/
         plots.py       point figures: scatter, slab diagnostic, PCA summary
         mosaic.py      image figures: gallery, mosaic
         style.py       shared palette and font sizes
+antenna3d/         the second pipeline -- its own package; see docs/antenna3d.md
+combine.py         the join between the two pipelines' tables
 scripts/
     run_segmentation.py   step 1 template -- copy per experiment, edit, run
     run_analysis.py       step 2 template
+    run_antennas.py       antenna3d template
+    run_combined.py       both pipelines, then the join
+    run_acceptance.py     the antenna probe-absent control test
 ```
+
+`antenna3d` is a sibling package, not a third `nucleus3d` subpackage: it
+meets `nucleus3d` at the label volume and at `nucleus_uid`, and `combine.py`
+holds that join outside both, so neither imports the other.
 
 **The import direction is the contract:** `analysis` imports from `core`,
 and `core` never imports from `analysis`. That is what lets step 1 run on a
@@ -181,9 +209,24 @@ What it writes into `OUTPUT_DIR`:
 | `field_summary.csv` | one row per field: nuclei found, unsegmented fraction |
 | `run_parameters.json` | every setting used, plus the worker plan |
 | `qc/*.png` | per-field validation figures -- look at these before trusting the table |
+| `labels/*.tif` | per-field label volumes (see below) |
 | `field_cache/` | per-field tables for fast re-runs (see below) |
 | `nucleus_boxes/` | per-nucleus substacks, **only if you ask for them** |
 | `failures.csv` | fields that errored, if any |
+
+### Label volumes
+
+`labels/<stem>_p<NN>.tif` is one compressed integer volume per field,
+carrying the voxel size in its OME metadata. On by default
+(`SAVE_LABEL_VOLUMES`), because it is cheap and it is what the second
+pipeline reads. It is written even for a field that segmented to nothing, so
+that an **empty** label volume means "nothing here" and a **missing** one
+means something broke.
+
+One consequence worth knowing: **it disables the measurement cache.** The
+cache stores the table, not the label image, so a cached field returns
+before segmentation runs and there would be no labels to write. Set
+`SAVE_LABEL_VOLUMES = False` to get cached re-runs of the table alone.
 
 ### Per-nucleus substacks (optional)
 
@@ -306,11 +349,17 @@ thing. Segmentation is **~38 s per field**; exporting that field's nucleus
 boxes is **~0.4 s**. Reusing boxes alone therefore saves almost nothing —
 what makes a repeated or resumed run cheap is not re-segmenting.
 
-**The field cache** (`use_cache=True`, on by default when `save_qc` and
-`save_boxes` are both off) writes each field's measurement table under
+**The field cache** (`use_cache=True`, on by default when `save_qc`,
+`save_boxes` and `save_labels` are all off) writes each field's measurement
+table under
 `<outdir>/field_cache/` and reads it back instead of re-segmenting. Measured
 on two fields: 85 s cold, 0.53 s warm, and the returned table is
 *bit-identical* to the freshly computed one.
+
+All three of those settings need the label image, which is not cached --
+only the table is. `SAVE_LABEL_VOLUMES` defaults to **on**, so a plain run
+does not use the field cache; turn it off when you want a cached re-run of
+the table alone.
 
 The cache key covers everything that can change the numbers: the source
 file's path, size and mtime, the stage position, the DNA channel,
@@ -753,6 +802,26 @@ Two consequences for analysis of this dataset:
 1. Prefer the ratio metrics (`*_cv*`, solidity, `*_radial_norm`, enrichment) for anything compared across files, and treat `*_mean_corr` / `*_integrated_corr` as within-session quantities.
 2. `Flavopiridol` was imaged only in `SetC`, so condition and session are partly confounded. Compare it against the `SetC` controls, not the pooled ones. Doing that, its chromatin-contrast effect holds: CV 0.274 → 0.405 (p = 4e-09), PC1 −2.05 → +2.18 (p = 2e-09), mid-plane solidity 0.983 → 0.971 (p = 0.02).
 
+## The second pipeline: antennas
+
+`antenna3d` traces nuclear F-actin antennas and writes one graph per nucleus
+(`graphs/<nucleus_uid>.graphml`) alongside a per-nucleus and a per-edge
+table. It reads step 1's `labels/` folder rather than segmenting anything
+itself, so its rows carry the same `nucleus_uid` and the two tables join.
+
+```bash
+python scripts/run_antennas.py     # antennas alone; point LABELS_DIR at step 1's output
+python scripts/run_combined.py     # both pipelines in order, then the join
+```
+
+[`docs/antenna3d.md`](docs/antenna3d.md) is the reference for all of it: the
+parameters, the measurements behind every default, the combined run and the
+join, and the caveats. **Read the caveats before quoting a number from it** —
+on the data this package was built from, the probe-absent control test fails,
+and it declines some data `nucleus3d` accepts.
+
+---
+
 ## Things that will bite you
 
 **The channel name is not the stain.** Check with `describe_file` on every new dataset. One dataset in this project is named `...JF646Hoechst...` and contains no Hoechst channel — the DNA stain is on `Cy5`. Another has no DNA channel at all, and the corresponding MATLAB script sets `NucSegChannel = S5P_SegChannel`, i.e. it segments nuclei from the Pol II signal because there is nothing else. A wrong channel produces a full, confident, meaningless table.
@@ -768,3 +837,21 @@ rest. Panel 3 of the QC figure is what catches this.
 mitotic figures.
 
 **A "clean" missed-nucleus check can be wrong.** During development the first version of this check thresholded at the 99th percentile, found only bright objects, and reported zero missed nuclei while two dim ones sat unsegmented. The QC figure is what exposed it. `unsegmented_fraction` now uses Otsu and dilates the masks by 0.5 µm so boundary halo does not drown the signal.
+
+**`nucleus_uid` maps forward only.** Build it from
+`(file stem, position, label)`; never parse one back out of a path. A stem
+can itself contain the separator — in this project's own data a field named
+`..._sphere_postfix__crop` has a doubled underscore — and inverting the
+encoding once silently dropped **24 of 80** control nuclei, a fifth of the
+arm, with no error. Every table carries `file`, `position` and `label` as
+their own columns so you never need to.
+
+**Segmentation at native 100× sampling is impractical.** A 2280×2588×123
+field is 726 M voxels, and the coarse DoG arm runs at σ = 217 px laterally:
+measured, **~24 min per field** for the DoG alone, with the process reaching
+18.8 GB and swapping on a 23 GB machine. `plan_workers` does not help — it
+would allocate one worker for a field that size. Segmenting a 5× laterally
+binned stack (0.23 µm, the grid `antenna3d` uses itself, and which its
+`bin_factor` path already accepts) takes **~0.3 min** and 0.12 GB, and a
+nucleus is still 35 px across. The toolbox does not yet offer that as a
+setting; see the open issue.

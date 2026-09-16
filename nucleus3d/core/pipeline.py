@@ -12,6 +12,7 @@ Output tree
         field_summary.csv         one row per field, QC numbers
         run_parameters.json       every parameter used, for reproducibility
         qc/                       one validation figure per field
+        labels/                   one label volume per field (if enabled)
         nucleus_boxes/            one OME-TIFF per nucleus  (if enabled)
         nucleus_boxes_index.csv   nucleus -> file map        (if enabled)
 """
@@ -30,7 +31,8 @@ import pandas as pd
 from . import io as n3io
 from .segment import SegParams, segment_nuclei
 from .quantify import quantify_nuclei
-from .export import export_nucleus_boxes, params_fingerprint
+from .export import (export_nucleus_boxes, export_field_labels,
+                     params_fingerprint)
 from .validate import validation_figure
 
 
@@ -131,7 +133,7 @@ def _read_cache(path):
 def process_field(stack, dna_channel, params, outdir, save_qc=True,
                   save_boxes=False, box_pad_um=1.0, box_include_mask=True,
                   extra_columns=None, min_blob_um3=5.0, reuse_boxes=True,
-                  cache_dir=None):
+                  cache_dir=None, save_labels=True):
     """
     Segment, quantify and (optionally) export one field.
 
@@ -146,11 +148,14 @@ def process_field(stack, dna_channel, params, outdir, save_qc=True,
     field against ~0.4 s for the box export, so reusing boxes alone saves
     almost nothing.
 
-    The cache is bypassed whenever `save_qc` or `save_boxes` is set, because
-    both need the label image, which is not cached -- only the table is.
+    The cache is bypassed whenever `save_qc`, `save_boxes` or `save_labels`
+    is set, because all three need the label image, which is not cached --
+    only the table is. `save_labels` defaults to True, so a plain run does
+    not use the cache; pass `save_labels=False` to get it back when you only
+    want the table.
     """
     cache_path = None
-    if cache_dir and not (save_qc or save_boxes):
+    if cache_dir and not (save_qc or save_boxes or save_labels):
         key = field_cache_key(stack, dna_channel, params, min_blob_um3)
         os.makedirs(cache_dir, exist_ok=True)
         cache_path = os.path.join(
@@ -175,6 +180,13 @@ def process_field(stack, dna_channel, params, outdir, save_qc=True,
         front = [c for c in ("nucleus_uid", "file", "position", "field", "label")
                  if c in meas.columns]
         meas = meas[front + [c for c in meas.columns if c not in front]]
+
+    # Written even when the field contained no nuclei, so that an EMPTY
+    # label volume means "nothing here" and a MISSING one means the handoff
+    # broke. Omitting it would make the antenna pipeline record a field that
+    # simply had nothing in it as a failure.
+    if save_labels:
+        export_field_labels(stack, labels, os.path.join(outdir, "labels"))
 
     boxes = pd.DataFrame()
     if save_boxes and len(props):
@@ -204,7 +216,7 @@ def run(input_dir, outdir, dna_channel, params=None, positions=None,
         recursive=True, save_qc=True, save_boxes=False, box_pad_um=1.0,
         box_include_mask=True, label_conditions=True, min_blob_um3=5.0,
         n_workers=1, max_workers=None, memory_fraction=0.75,
-        reuse_boxes=True, use_cache=True, verbose=True):
+        reuse_boxes=True, use_cache=True, save_labels=True, verbose=True):
     """
     Run the full pipeline over a folder of .nd2 files.
 
@@ -219,6 +231,10 @@ def run(input_dir, outdir, dna_channel, params=None, positions=None,
     params : SegParams or None
     positions : list of stage-position indices, or None for all of them
     save_boxes : write one 3D OME-TIFF per nucleus
+    save_labels : write one label volume per field into <outdir>/labels.
+                  This is what antenna3d reads; leave it on unless you are
+                  certain no downstream pipeline will want these masks.
+                  Turning it off re-enables the measurement cache.
     label_conditions : add a `condition` column from the parent folder name
     n_workers : 1 for serial (default), an integer for a fixed pool, or
                 "auto" to size the pool from measured memory use. Peak RAM
@@ -268,7 +284,8 @@ def run(input_dir, outdir, dna_channel, params=None, positions=None,
             box_include_mask=box_include_mask, min_blob_um3=min_blob_um3,
             extra_for=_extra_for, n_workers=n_workers,
             max_workers=max_workers, memory_fraction=memory_fraction,
-            reuse_boxes=reuse_boxes, cache_dir=cache_dir, verbose=verbose)
+            reuse_boxes=reuse_boxes, cache_dir=cache_dir,
+            save_labels=save_labels, verbose=verbose)
 
         for res in results:
             if not res["ok"]:
@@ -297,7 +314,7 @@ def run(input_dir, outdir, dna_channel, params=None, positions=None,
                 save_boxes=save_boxes, box_pad_um=box_pad_um,
                 box_include_mask=box_include_mask, extra_columns=extra,
                 min_blob_um3=min_blob_um3, reuse_boxes=reuse_boxes,
-                cache_dir=cache_dir)
+                cache_dir=cache_dir, save_labels=save_labels)
 
             if len(meas):
                 meas_all.append(meas)
@@ -342,6 +359,9 @@ def run(input_dir, outdir, dna_channel, params=None, positions=None,
                        positions=positions,
                        save_boxes=save_boxes, box_pad_um=box_pad_um,
                        box_include_mask=box_include_mask,
+                       save_labels=save_labels,
+                       labels_dir=(os.path.abspath(os.path.join(outdir, "labels"))
+                                   if save_labels else None),
                        n_files=len(paths), n_fields=len(jobs),
                        n_failed=len(failures),
                        n_workers=n_workers, parallel_plan=parallel_plan,
@@ -363,4 +383,6 @@ def run(input_dir, outdir, dna_channel, params=None, positions=None,
                   .to_string(index=False), flush=True)
 
     return dict(measurements=table, field_summary=summary,
-                box_index=box_index, failures=pd.DataFrame(failures))
+                box_index=box_index, failures=pd.DataFrame(failures),
+                labels_dir=(os.path.join(outdir, "labels") if save_labels
+                            else None))

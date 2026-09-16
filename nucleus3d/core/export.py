@@ -217,3 +217,58 @@ def read_box_provenance(path):
     if not m:
         return {}
     return json.loads(unescape(m.group(1), {"&quot;": '"', "&apos;": "'"}))
+
+
+def export_field_labels(stack, labels, outdir, compression="zlib"):
+    """
+    Write the whole-field label volume as a 3D OME-TIFF.
+
+    This is the handoff file. `export_nucleus_boxes` writes one crop per
+    nucleus, which is what you look at; this writes the labels themselves,
+    which is what the next pipeline in the toolbox reads. `antenna3d` looks
+    for exactly this name in its `LABELS_DIR`, matches it to a field, and
+    then measures the structures inside each mask.
+
+    The voxel size is written into the OME metadata, and that is not
+    decoration. A label volume with no spacing is not a measurement, and a
+    downstream tool that guesses one silently rescales every volume it
+    reports -- so `antenna3d.labels_from_tiff` refuses a file without it
+    rather than assuming.
+
+    Z is not cropped, for the same reason it is not cropped in the nucleus
+    boxes: the source stack is a thin slab through taller nuclei. The
+    consumer checks that the label volume and the image have the same
+    number of planes, and masks from a different stack would otherwise be
+    measured against these pixels without any error at all.
+
+    The file is named `<file stem>_p<NN>.tif`, from the stem of the source
+    .nd2 and the stage position -- the same two parts, in the same order,
+    that `nucleus_uid` is built from.
+
+    Returns
+    -------
+    The path written.
+    """
+    os.makedirs(outdir, exist_ok=True)
+
+    dz, dy, dx = stack.voxel_um
+    stem = os.path.splitext(os.path.basename(stack.source_path))[0]
+    path = os.path.join(outdir, f"{stem}_p{stack.position:02d}.tif")
+
+    # uint16 holds any plausible per-field nucleus count; widen rather than
+    # wrap if a field ever exceeds it, because a wrapped label silently
+    # merges two nuclei into one.
+    n_max = int(labels.max()) if labels.size else 0
+    dtype = np.uint16 if n_max <= np.iinfo(np.uint16).max else np.uint32
+
+    tifffile.imwrite(
+        path, labels.astype(dtype, copy=False), ome=True,
+        compression=compression, photometric="minisblack",
+        metadata={
+            "axes": "ZYX",
+            "PhysicalSizeX": dx, "PhysicalSizeXUnit": "µm",
+            "PhysicalSizeY": dy, "PhysicalSizeYUnit": "µm",
+            "PhysicalSizeZ": dz, "PhysicalSizeZUnit": "µm",
+        },
+    )
+    return path
