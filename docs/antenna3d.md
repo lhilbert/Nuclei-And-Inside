@@ -203,8 +203,8 @@ both = join_nuclei_and_antennas("results/nuclei", "results/antennas")
 ```
 
 That is a `merge(on="nucleus_uid")` with the checks that make it safe to trust — see
-[Running both](../README.md#running-the-nuclei-and-the-antennas-together). The bare merge works
-too, but returns an empty frame rather than an error if the ids ever drift apart again.
+[Running both, and the join](#running-both-and-the-join). The bare merge works too, but returns
+an empty frame rather than an error if the ids ever drift apart again.
 
 The same id is the GraphML filename stem:
 
@@ -458,7 +458,9 @@ it is cut at its widest. On data that is **not** axially truncated by its acquis
 slabs against 7–10 µm nuclei — 2D-per-plane segmentation gave a median of **0.8764**, against
 **0.0548** for a 3D flow field over the same fields. That is pure segmentation defect, and every
 density computed against those masks was divided by a volume roughly 23% too small. Check panel
-4 and the `axial_edge_fraction` column on any masks you bring.
+4 and the `axial_edge_fraction` column on any masks you bring — **including `nucleus3d`'s**,
+which segments in 3D and scores 0.087 on a phantom but scored **0.90–1.00 on five of six** traced
+nuclei of real 100× sphere data.
 
 **The probe is a reagent, and the channel is not "actin".** HA-K-actin reports **F-actin**, so
 the channel *is* the antenna. A genetically encoded actin chromobody reports actin **regardless
@@ -488,6 +490,56 @@ design in front of you.
 - **AntEnnA** — the research repository this package was extracted from. It keeps the full
   nine-stage form with per-stage manifests, three experiment descriptors and the append-only
   decision record behind every number quoted above.
+
+### Running both, and the join
+
+```bash
+python scripts/run_combined.py
+```
+
+Runs `nucleus3d`'s segmentation, hands its label volumes here, and joins the two tables:
+
+```
+results/
+    nuclei/                        a full nucleus3d output tree
+        nuclei_measurements.csv
+        labels/<stem>_p00.tif      <- the handoff
+        qc/
+    antennas/                      a full antenna3d output tree
+        antenna_nuclei.csv
+        antenna_edges.csv
+        graphs/<nucleus_uid>.graphml
+        qc/traces/
+    nuclei_and_antennas.csv        one row per nucleus both pipelines measured
+```
+
+The two trees are separate because both pipelines write a `field_summary.csv`, a
+`run_parameters.json` and a `failures.csv`. Pointed at one folder they would overwrite each
+other. Set `STOP_AFTER_SEGMENTATION = True` on a new dataset: this half is the long one, and
+there is no point spending it on masks nobody has looked at.
+
+`join_nuclei_and_antennas` **raises** rather than returning an empty frame when no id matches —
+that is what a drifted id looks like, and it is otherwise indistinguishable from a dataset in
+which nothing was detected. It also refuses a duplicated id, and disagreement on `label` or
+`position` under a shared id. `file`, `condition` and `source_path` are suffixed `_nucleus` /
+`_antenna` rather than collapsed: `file` is a basename with its extension on one side and a stem
+on the other.
+
+**Fewer joined rows than nucleus rows is correct, not a bug.** The two gate differently on
+purpose: this package takes 100–4000 µm³ and drops nuclei touching an xy edge, because a nucleus
+cut laterally has no usable denominator; `nucleus3d` takes anything over 15 µm³ and keeps border
+nuclei, because a slab volume is not a nuclear volume. The join prints the reconciliation.
+Measured on two real fields: 42 nucleus rows → 37 pass the volume gate → 22 survive the border
+filter, and `n_antenna_only` is 0.
+
+There is no requirement to use `run_combined.py` — `run_segmentation.py` and `run_antennas.py`
+do the two halves independently; point `LABELS_DIR` at the former's `labels/` folder and the
+join works the same.
+
+**Both packages export a `SegParams` and a `describe_file`, and they are different objects.**
+Different fields, different return shapes. In any script that touches both, import them
+qualified — `import nucleus3d as n3`, `import antenna3d as a3` — as `run_combined.py` does. A
+`from ... import *` binds one name to the other package's object and nothing errors.
 
 ### Pulling a newer antenna3d from AntEnnA
 
