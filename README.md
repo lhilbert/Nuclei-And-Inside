@@ -59,8 +59,8 @@ Install `uv`: https://docs.astral.sh/uv/getting-started/installation/
 `uv` creates and manages a project-local virtual environment in `.venv`:
 
 ```bash
-git clone https://github.com/<org>/nucleus3d.git
-cd nucleus3d
+git clone https://github.com/lhilbert/Nuclei-And-Inside.git
+cd Nuclei-And-Inside
 uv sync
 ```
 
@@ -92,8 +92,8 @@ Anaconda Terms of Service, which can require a paid licence for institutional
 use.
 
 ```bash
-git clone https://github.com/<org>/nucleus3d.git
-cd nucleus3d
+git clone https://github.com/lhilbert/Nuclei-And-Inside.git
+cd Nuclei-And-Inside
 conda create -n nucleus3d python=3.11
 conda activate nucleus3d
 pip install -e .
@@ -541,7 +541,7 @@ nucleus_mosaic(res["scores"], "results/pca_mosaic.png", x="PC1", y="PC2")
 `sklearn.decomposition.PCA` up to component sign, which is pinned so that
 each component's largest loading is positive (otherwise the same data can
 produce a mirrored figure on another machine). No new dependency; see
-`pca.py` for why.
+`analysis/features.py` for why.
 
 **"All features" needs two qualifications, and both change the answer.**
 Position columns and per-field backgrounds are excluded: stage coordinates
