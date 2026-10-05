@@ -3,12 +3,15 @@ requires = ["setuptools>=64"]
 build-backend = "setuptools.build_meta"
 
 [project]
+# The distribution keeps its name. It now ships a second import package,
+# `antenna3d`, alongside `nucleus3d` -- see [tool.setuptools.packages.find].
 name = "nucleus3d"
-version = "1.1.0"
-description = "3D nucleus segmentation, quantification and feature analysis for Nikon .nd2 z-stacks"
+version = "1.2.0"
+description = "3D nucleus segmentation, quantification and feature analysis for Nikon .nd2 z-stacks, and the analysis of structures inside nuclei"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    # shared
     "nd2>=0.7",
     "numpy>=1.23",
     "scipy>=1.9",
@@ -16,7 +19,29 @@ dependencies = [
     "pandas>=1.5",
     "tifffile>=2023.1.1",
     "matplotlib>=3.6",
+    # antenna3d only
+    "networkx>=3.0",          # the per-nucleus graph, and GraphML
+    "skan>=0.11",             # skeleton -> paths; the tracing step depends on its API
 ]
 
+[project.optional-dependencies]
+# Only needed if you let antenna3d segment nuclei itself. The intended path in
+# this toolbox is to hand it nucleus3d's label volumes, in which case neither is
+# installed or imported.
+cellpose = ["cellpose>=4.0", "torch"]
+# Parquet alongside the CSVs. The antenna edge table is mostly `polyline`;
+# parquet is roughly 10x smaller.
+parquet = ["pyarrow"]
+test = ["pytest"]
+
 [tool.setuptools.packages.find]
-include = ["nucleus3d*"]
+include = ["nucleus3d*", "antenna3d*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# importlib, not the default prepend: the test folders are per-package and will
+# hold same-named modules (tests/nucleus3d/test_io.py beside
+# tests/antenna3d/test_io.py). Under prepend the second one to be collected is
+# an import collision, not a test run.
+addopts = "--import-mode=importlib"
+markers = ["needs_data: requires .nd2 files; set ANTENNA3D_TEST_ND2 to a file or folder"]

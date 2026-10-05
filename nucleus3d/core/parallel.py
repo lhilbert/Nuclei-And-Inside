@@ -363,7 +363,7 @@ def _process_one(job):
 
     (path, position, dna_channel, params, outdir, save_qc, save_boxes,
      box_pad_um, box_include_mask, extra_columns, min_blob_um3,
-     reuse_boxes, cache_dir) = job
+     reuse_boxes, cache_dir, save_labels) = job
 
     t0 = time.time()
     try:
@@ -376,7 +376,7 @@ def _process_one(job):
             save_boxes=save_boxes, box_pad_um=box_pad_um,
             box_include_mask=box_include_mask, extra_columns=extra_columns,
             min_blob_um3=min_blob_um3, reuse_boxes=reuse_boxes,
-            cache_dir=cache_dir)
+            cache_dir=cache_dir, save_labels=save_labels)
 
         return dict(ok=True, name=stack.name, meas=meas, boxes=boxes, qc=qc,
                     peak_bytes=_maxrss_bytes(), elapsed=time.time() - t0,
@@ -399,7 +399,8 @@ def run_parallel(jobs, dna_channel, params, outdir, save_qc=True,
                  save_boxes=False, box_pad_um=1.0, box_include_mask=True,
                  min_blob_um3=5.0, extra_for=None, n_workers="auto",
                  max_workers=None, memory_fraction=0.75, calibrate=True,
-                 reuse_boxes=True, cache_dir=None, verbose=True):
+                 reuse_boxes=True, cache_dir=None, save_labels=True,
+                 verbose=True):
     """
     Process a list of (path, position) jobs across processes.
 
@@ -418,7 +419,7 @@ def run_parallel(jobs, dna_channel, params, outdir, save_qc=True,
         extra = extra_for(path) if extra_for else None
         return (path, pos, dna_channel, params, outdir, save_qc, save_boxes,
                 box_pad_um, box_include_mask, extra, min_blob_um3,
-                reuse_boxes, cache_dir)
+                reuse_boxes, cache_dir, save_labels)
 
     # --- predict from geometry -----------------------------------------
     geom = field_geometry(jobs[0][0])

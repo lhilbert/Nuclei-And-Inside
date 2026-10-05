@@ -7,6 +7,7 @@ the field, the file and the exported crop it came from.
 """
 
 import os
+import re
 
 import numpy as np
 import pandas as pd
@@ -31,16 +32,27 @@ def background_level(vol, labels, dilate_iter=6):
     return float(np.median(bg_pixels)) if bg_pixels.size else 0.0
 
 
+#: Anything outside this set is replaced by '-' before it enters an id.
+#: The id is used verbatim as a filename, so it may only contain characters
+#: that are safe in a path, a shell word and a URL.
+_SAFE = re.compile(r"[^A-Za-z0-9._-]+")
+
+
 def nucleus_uid(stack, lab):
     """
-    Stable identifier for one nucleus: '<file stem>#p<pos>_nuc<label>'.
+    Stable identifier for one nucleus: '<file stem>_p<pos>_nuc<label>'.
 
-    Unique across an entire run, and reused as the stem of the exported
-    OME-TIFF, so a row in the measurement table and a file on disk carry
-    the same name.
+    Unique across an entire run, and used verbatim as the stem of the
+    exported OME-TIFF, so a row in the measurement table and a file on disk
+    carry the same name.
+
+    Built FORWARD from (stem, position, label), and never parsed back out of
+    a path. A stem can itself contain the separator, so the encoding is not
+    invertible -- that is why every table carries `file`, `position` and
+    `label` as their own columns instead.
     """
     stem = os.path.splitext(os.path.basename(stack.source_path))[0]
-    return f"{stem}#p{stack.position:02d}_nuc{int(lab):03d}"
+    return f"{_SAFE.sub('-', stem)}_p{stack.position:02d}_nuc{int(lab):03d}"
 
 
 def weighted_radius(coords_um, weights):
