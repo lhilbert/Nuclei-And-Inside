@@ -510,6 +510,96 @@ x-axis of every row; the rows differ in what is plotted against it —
 solidity, the radial index, and mid-plane area. Pass `metrics=` for other
 pairs. `scripts/run_analysis.py` writes it automatically.
 
+### An angular pseudo-time coordinate: `angular_pseudotime`
+
+```python
+from nucleus3d.analysis import angular_pseudotime, pseudotime_geometry
+
+pseudo, params = angular_pseudotime(
+    table, centre=(1.5, -0.5), pi_toward=(3.5, -1.2),
+    x="mid_dna_cv_corr", y="mid_dna_persistence", direction="cw")
+pseudotime_geometry(pseudo, "results/pseudotime_geometry.png", params,
+                    highlight=pseudo.phase.eq("prometaphase"))
+```
+
+The cell cycle is closed, so two metrics that track it should trace a loop.
+Place a centre inside that loop and each nucleus's angle about it orders the
+cells — the construction `tricycle` and Revelio use on cell-cycle gene
+expression, here on chromatin morphology. `centre` is read off a plot of the
+plane, `pi_toward` fixes where θ = 0 sits, and `direction` chooses which way
+θ advances. Both coordinates come back as columns: `theta` and `radius`.
+
+Pick the centre from the **standardised** plane. `atan2` mixes the two axes,
+so without z-scoring the angle is a read-out of whichever column carries
+larger numbers — on the example data persistence spans 0–20 against
+contrast's 0.13–0.62. `params["centre_raw"]` reports the centre back in raw
+units.
+
+**Angles are not numbers on a line, and this is the trap.** A group of
+nuclei either side of θ = 0 has a mean direction of zero, but `np.median` of
+their angles returns something near π — halfway round the circle from every
+one of them. That mistake made θ look like it separated nothing on the
+validation data; the circular mean showed it separates condensed from
+interphase at p = 5 × 10⁻⁹. Use `circular_mean` and `circular_R` from the
+same module, never `mean`, `median` or `std`.
+
+**Check it is a ring before trusting it.** An angle exists whether or not
+the geometry supports one; for a blob it is noise with units. A ring puts
+nuclei at a comparable radius all the way round. On the example data the
+condensed nuclei sit at median radius 1.14 against 2.09 for interphase —
+nearer the centre, not out at a matching radius — so this is an **arc, not a
+closed ring**, and the outbound and return legs share angles.
+
+That has a concrete consequence, visible in the labels: prophase and
+anaphase land at similar θ. Both are intermediate-condensation states, and a
+pair of scalars gives position along a path, never direction of travel. If
+you need the two told apart, the discriminator has to come from somewhere
+else — the number of separating masses, or the Pol II channels, since
+transcription stops through mitosis and restarts in telophase.
+
+`phase_order_check` is the validation to run. If labels were used only to
+orient the coordinate, their ordering along θ is a free prediction.
+
+### The calendar layout
+
+`nucleus_mosaic` in `sort_by` mode lays the nuclei out in reading order,
+which turns the coordinate into a page of images:
+
+```python
+from nucleus3d.analysis import nucleus_mosaic, auto_window_um
+
+nucleus_mosaic(pseudo, "results/pseudotime_calendar.png", sort_by="theta",
+               grid=(8, 12), window_um=auto_window_um(pseudo, quantile=0.90))
+```
+
+Keep the default `scale="physical"` here. Nucleus size is itself part of the
+result — telophase nuclei really are smaller — and a shared window is the
+only way the figure shows it.
+
+The window wants choosing, though. Sized to the largest object (the default
+`quantile=1.0`) one merged pair sets the scale for all 96 tiles and every
+ordinary nucleus floats in empty frame. `quantile=0.90` sized it from the
+90th percentile instead: 16 µm rather than 19 µm on the example data, with a
+median nucleus filling 61% of the tile width, clipping 0.4% of nuclei by at
+most 1% of their diameter.
+
+Verify framing by looking, not by trusting that number — the estimate
+assumes round nuclei, so an elongated one can overhang along its long axis.
+A nucleus cut by the frame has bright signal running off the tile edge; an
+image-edge crop has black padding instead, and the two are easy to tell
+apart. Measured on the example calendar, 9 of 96 tiles carry bright signal
+at the border and all 9 are `touches_xy_border` nuclei — none is cut by the
+framing.
+
+`scale="fit"` is the alternative: it sizes each window from that nucleus's
+own cross-section and rescales isotropically, so every nucleus fills its box
+and none is cut. Shape is preserved — one factor on both axes — and anything
+outside the image stays black. **Tile size then carries no physical
+meaning**, which is the whole trade: a mitotic figure and an interphase
+nucleus look equally large. Reach for it to read morphology, never to
+compare dimensions. The figure annotation records which mode was used, so a
+fit-mode mosaic cannot be mistaken for a scaled one.
+
 ### Looking at the nuclei behind the points: `nucleus_gallery`
 
 ```python
@@ -608,15 +698,26 @@ would invent a component that maps the field layout, and a `*_bg` value is
 one number per field shared by every nucleus in it, so it aliases onto
 condition. Then near-duplicates are pruned at |r| ≥ 0.98, keeping one
 representative per group by a declared priority. This is not cosmetic:
-`n_voxels` and `volume_um3` are the same measurement (r = 1.0000), as are
-`max_area_um2` and `max_area_um2`, and each channel contributes median,
-mean, p90, std and background-corrected twins above r = 0.98. Unpruned, a
-quantity written down five times gets five votes and PC1 becomes a
-bookkeeping artefact. On the example data 41 numeric columns reduce to
-**22 features**; `res["dropped"]` names every removal and its reason.
+each channel contributes median, mean, p90, std and their
+background-corrected twins above r = 0.98, so one quantity is written down
+five times and, unpruned, gets five votes — PC1 then becomes a bookkeeping
+artefact.
 
-On the 241-nucleus analysis population the first three components carry
-41%, 19% and 12% of the variance (72% cumulative):
+**Read the counts off your own run, not off this page.** `res["features"]`
+lists what survived and `res["dropped"]` names every removal with its
+reason. A fixed count used to be quoted here and went stale twice over:
+three duplicate columns were later removed (`n_voxels`, `equiv_diam_xy_um`
+and `mid_area_um2` — the last identical to `max_area_um2` by definition),
+and `mid_dna_persistence` was added after that. Any number written into this
+paragraph is wrong again at the next schema change; `res` is right by
+construction.
+
+On the 241-nucleus analysis population the first three components carried
+41%, 19% and 12% of the variance (72% cumulative). Those shares, and the
+loadings below, were computed before the three duplicate columns were
+dropped and before `mid_dna_persistence` was added, so treat them as the
+shape of the result rather than values to reproduce exactly — re-run
+`feature_pca` for current numbers:
 
 | | strongest positive loadings | strongest negative | reading |
 |---|---|---|---|

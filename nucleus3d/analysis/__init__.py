@@ -10,6 +10,10 @@ data reachable.
     plots       point figures: midplane_scatter, zclip_diagnostics,
                 pca_summary
     mosaic      image figures: nucleus_gallery, nucleus_mosaic
+    pseudotime  angular cell-cycle coordinate: angular_pseudotime,
+                pseudotime_geometry, phase_order_check, and the circular
+                statistics that angles REQUIRE (see that module's docstring
+                before averaging a column of them)
     style       shared palette and font sizes
 
 Two filters are applied by default by every figure function here, and both
@@ -21,9 +25,14 @@ matter more than they sound: nuclei whose widest plane is a slab face
 from .features import feature_pca, feature_matrix
 from .plots import midplane_scatter, zclip_diagnostics, pca_summary
 from .mosaic import nucleus_gallery, nucleus_mosaic, auto_window_um
+from .pseudotime import (angular_pseudotime, pseudotime_geometry,
+                         phase_order_check, circular_mean, circular_R,
+                         angular_distance)
 
 __all__ = [
     "feature_pca", "feature_matrix",
     "midplane_scatter", "zclip_diagnostics", "pca_summary",
     "nucleus_gallery", "nucleus_mosaic", "auto_window_um",
+    "angular_pseudotime", "pseudotime_geometry", "phase_order_check",
+    "circular_mean", "circular_R", "angular_distance",
 ]

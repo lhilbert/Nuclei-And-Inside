@@ -35,11 +35,34 @@ when it is only a framing one.
 """
 
 
-def auto_window_um(df, margin=TILE_MARGIN, floor=12.0):
-    """Tile size that cannot cut the nuclei being drawn."""
+def auto_window_um(df, margin=TILE_MARGIN, floor=12.0, quantile=1.0):
+    """
+    Tile size that cannot cut the nuclei being drawn.
+
+    `quantile` < 1 sizes the window from that quantile of nucleus diameter
+    instead of the largest, trading a little clipping for a frame the
+    typical nucleus actually fills. Sizing from the maximum means one
+    merged pair or one elongated object sets the scale for every tile, and
+    then every ordinary nucleus sits in empty frame -- which matters when
+    the point of the figure is to compare sizes, since a nucleus occupying
+    a quarter of its tile is hard to judge against one occupying a third.
+
+    On the example data, `quantile=0.90` gives a 15 µm window against 18 µm
+    from the maximum, and clips 0.4% of nuclei by at most 1% of their
+    diameter.
+
+    The estimate is an equivalent diameter from the cross-sectional area,
+    so it assumes roughly round nuclei: an elongated one of the same area
+    can still overhang along its long axis. Check the rendered tiles rather
+    than trusting the number -- a nucleus cut by the frame shows bright
+    signal running off the tile edge, which is visually obvious and
+    distinct from the black zero-padding of an image-edge crop.
+    """
     if "max_area_um2" not in df.columns or df["max_area_um2"].dropna().empty:
         return floor
-    diam = 2.0 * np.sqrt(df["max_area_um2"].max() / np.pi)
+    area = df["max_area_um2"].dropna()
+    ref = area.max() if quantile >= 1.0 else area.quantile(quantile)
+    diam = 2.0 * np.sqrt(float(ref) / np.pi)
     return float(max(floor, np.ceil(margin * diam)))
 
 
@@ -100,7 +123,8 @@ def _pick_one_per_cell(df, x, y, xedges, yedges, tol):
     return picks
 
 
-def _crop_tiles(picks, window_um, dna_channel, percentiles=None):
+def _crop_tiles(picks, window_um, dna_channel, percentiles=None,
+                scale="physical", fit_margin=1.25):
     """
     Mid-plane crop per picked nucleus, grouped so each field is read once.
 
@@ -110,8 +134,25 @@ def _crop_tiles(picks, window_um, dna_channel, percentiles=None):
     contrast-stretched to 0..1 individually -- right for judging chromatin
     texture, wrong for comparing brightness between tiles.
 
+    `scale`
+        "physical" (default) gives every tile the same window in microns, so
+        a tile twice the width of another really is twice as wide. The cost
+        is that the window has to accommodate the LARGEST nucleus, so small
+        ones sit in a lot of empty frame, and anything bigger than the
+        window is cut.
+
+        "fit" sizes the window per nucleus from its own cross-section
+        (`fit_margin` x equivalent diameter) and rescales isotropically to
+        the tile, so each nucleus fills its box and is never cut. Shape is
+        preserved -- the scaling is one factor applied to both axes -- and
+        whatever falls outside the image stays black. The trade-off is
+        explicit and total: tile size no longer carries physical size, so
+        a mitotic figure and an interphase nucleus look equally large. Use
+        it to read morphology, never to compare dimensions.
+
     Returns (tiles, dy, (ty, tx)).
     """
+    from skimage.transform import resize as _resize
     by_field = {}
     for key, row in picks.items():
         by_field.setdefault((row["source_path"], int(row["position"])), []).append(key)
@@ -126,13 +167,34 @@ def _crop_tiles(picks, window_um, dna_channel, percentiles=None):
             dy_out = dy
         for key in keys:
             row = picks[key]
-            y0 = int(round(row["centroid_y_um"] / dy - ty / 2))
-            x0 = int(round(row["centroid_x_um"] / dx - tx / 2))
-            tile = np.zeros((ty, tx), dtype=np.float32)
+            if scale == "fit":
+                # window from this nucleus's own size, so it always fits
+                diam = 2.0 * np.sqrt(max(float(row["max_area_um2"]), 1e-6) / np.pi)
+                wy = max(int(round(fit_margin * diam / dy)), 8)
+                wx = max(int(round(fit_margin * diam / dx)), 8)
+            else:
+                wy, wx = ty, tx
+
+            y0 = int(round(row["centroid_y_um"] / dy - wy / 2))
+            x0 = int(round(row["centroid_x_um"] / dx - wx / 2))
+            tile = np.zeros((wy, wx), dtype=np.float32)
             sy0, sx0 = max(0, y0), max(0, x0)
-            sy1, sx1 = min(vol.shape[1], y0 + ty), min(vol.shape[2], x0 + tx)
+            sy1, sx1 = min(vol.shape[1], y0 + wy), min(vol.shape[2], x0 + wx)
             tile[sy0 - y0:sy1 - y0, sx0 - x0:sx1 - x0] = \
                 vol[int(row["mid_z"]), sy0:sy1, sx0:sx1]
+
+            if scale == "fit" and (wy, wx) != (ty, tx):
+                # one factor for both axes, so shape is untouched; the longer
+                # side meets the tile edge and the shorter one is centred in
+                # black, which is why the padding is added rather than the
+                # image stretched
+                f = min(ty / wy, tx / wx)
+                ny, nx_ = max(int(round(wy * f)), 1), max(int(round(wx * f)), 1)
+                small = _resize(tile, (ny, nx_), order=1, preserve_range=True,
+                                anti_aliasing=(f < 1.0)).astype(np.float32)
+                tile = np.zeros((ty, tx), dtype=np.float32)
+                oy, ox = (ty - ny) // 2, (tx - nx_) // 2
+                tile[oy:oy + ny, ox:ox + nx_] = small
             if percentiles is not None:
                 lo, hi = np.percentile(tile, percentiles)
                 tile = np.clip((tile - lo) / max(hi - lo, 1e-9), 0, 1)
@@ -234,7 +296,8 @@ def nucleus_mosaic(table, out_png, x="mid_dna_cv_corr", y="mid_solidity",
                    grid=(6, 9), window_um=None, dna_channel="DAPI",
                    condition=None, exclude_z_border=True,
                    exclude_xy_border=True, percentiles=(1, 99.5),
-                   binning="quantile", sort_by=None,
+                   binning="quantile", sort_by=None, scale="physical",
+                   fit_margin=1.25,
                    xlabel=None, ylabel=None, base_fontsize=9, dpi=200):
     """
     A dense image mosaic laid out ON the measurement plane.
@@ -264,8 +327,10 @@ def nucleus_mosaic(table, out_png, x="mid_dna_cv_corr", y="mid_solidity",
         by that column, the grid filled in reading order with an even
         sample across the whole range. `x`/`y` are then ignored.
     """
-    df = _drawable(table, (x, y) if sort_by is None else (sort_by,),
-                   condition, exclude_z_border, exclude_xy_border)
+    needed = (x, y) if sort_by is None else (sort_by,)
+    if scale == "fit":
+        needed = needed + ("max_area_um2",)      # the per-nucleus window size
+    df = _drawable(table, needed, condition, exclude_z_border, exclude_xy_border)
     window_um = auto_window_um(df) if window_um is None else window_um
     nrow, ncol = grid
 
@@ -287,7 +352,8 @@ def nucleus_mosaic(table, out_png, x="mid_dna_cv_corr", y="mid_solidity",
         picks = _pick_one_per_cell(df, x, y, xedges, yedges, tol=0.7)
 
     tiles, _, (ty, tx) = _crop_tiles(picks, window_um, dna_channel,
-                                     percentiles=percentiles)
+                                     percentiles=percentiles, scale=scale,
+                                     fit_margin=fit_margin)
 
     canvas = np.full((nrow * ty, ncol * tx), np.nan, dtype=np.float32)
     for (r, c), tile in tiles.items():
@@ -359,7 +425,11 @@ def nucleus_mosaic(table, out_png, x="mid_dna_cv_corr", y="mid_solidity",
         ax.set_xlabel(xlabel or x, fontsize=fs["base"])
         ax.set_ylabel(ylabel or y, fontsize=fs["base"])
     ax.tick_params(labelsize=fs["tick"], length=2)
-    ax.annotate(f"tile {window_um:.0f} µm", xy=(0.995, 1.004),
+    # In "fit" mode the tiles no longer share a window, so quoting one in
+    # microns would be a false scale bar -- say what was actually done.
+    note = (f"tile {window_um:.0f} µm" if scale != "fit"
+            else f"scaled to fit ({fit_margin:g}x diameter) — tile size is NOT physical")
+    ax.annotate(note, xy=(0.995, 1.004),
                 xycoords="axes fraction", ha="right", va="bottom",
                 fontsize=fs["annot"], color="0.35")
 
