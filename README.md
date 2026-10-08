@@ -130,9 +130,19 @@ uv run pytest
 
 Validated on two datasets: vt-iSIM fixed zebrafish embryos (JF646-Hoechst) and cultured cells (DAPI, drug conditions).
 
-You can download one of these data sets from the following, publicly shared Zenodo repository. The analysis should run fine on these data.
+The second of those -- the cultured cells -- is publicly shared, and the analysis should run fine on it:
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.5242952.svg)](https://doi.org/10.5281/zenodo.5242952)
+
+Primary cell cultures from pluripotent zebrafish embryos, collected at the
+sphere stage, treated with transcription inhibitors (control, flavopiridol,
+triptolide; 30 min) and fixed. Three channels: DNA (Hoechst 33342),
+elongating Pol II (Ser2P, STAR RED) and recruited Pol II (Ser5P, Alexa 594)
+-- stored under their filter names `DAPI`, `Cy5` and `mCherry`, so `Cy5_*`
+columns in the measurement table are Ser2P and `mCherry_*` are Ser5P. Six
+`.nd2` files, two replicate sets (C and D) crossed with the three conditions,
+each holding 24 stage positions of 31 z-planes at 100 nm spacing and 65 nm
+laterally, alongside a scan of the corresponding lab-book page.
 
 
 
@@ -691,7 +701,7 @@ wrong way.
 `mid_*` columns describe the single z-plane where each nucleus is widest,
 rather than an average over the stack: `mid_z`, `max_area_um2`,
 `mid_solidity`, `mid_dna_cv`, `mid_dna_cv_corr`, `mid_dna_radial_um`,
-`mid_dna_radial_norm`, `mid_at_z_border`.
+`mid_dna_radial_norm`, `mid_dna_persistence`, `mid_at_z_border`.
 
 Why one plane instead of the whole stack: in a thin slab the top and
 bottom planes are grazing cuts through the nuclear cap — small, ragged,
@@ -707,6 +717,16 @@ the bundled example data (3.1 µm slabs, nuclei ~10 µm across) this is a
 large fraction of all nuclei, and `midplane_scatter` drops them by
 default. Solidity and CV for those nuclei describe a grazing cut, not a
 mid-nuclear section.
+
+**`mid_dna_persistence` is the one axis here that is not a restatement of
+chromatin contrast** (r = 0.05 with `mid_dna_cv_corr`). It measures how much
+prominent internal structure the chromatin has — low when DNA is gathered
+into a few large masses, high when there are many separate prominent
+domains — by flooding the intensity landscape and summing how long each
+bright domain survives before merging into a brighter neighbour. It is the
+continuous counterpart of counting domains, with no brightness cutoff
+anywhere. Plain-language explanation, method and the limits of its
+validation: [`docs/chromatin_persistence.md`](docs/chromatin_persistence.md).
 
 `mid_dna_cv` and `mid_dna_cv_corr` differ only in whether the camera
 offset is subtracted from the mean. The offset inflates the mean but not

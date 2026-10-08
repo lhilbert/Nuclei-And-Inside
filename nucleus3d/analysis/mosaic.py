@@ -313,7 +313,19 @@ def nucleus_mosaic(table, out_png, x="mid_dna_cv_corr", y="mid_solidity",
         extent = (xedges[0], xedges[-1], yedges[0], yedges[-1])
         xgrid, ygrid = xedges[1:-1], yedges[1:-1]
 
-    ax.imshow(canvas, cmap=cmap, vmin=0, vmax=1, aspect="auto",
+    # Each tile covers a physically SQUARE window (ty = window_um/dy,
+    # tx = window_um/dx), so a cell must be drawn square or every nucleus is
+    # stretched. `aspect="auto"` fills the axes box instead, and since the
+    # box is shrunk by tick labels and the colourbar-free margin it is never
+    # exactly the canvas aspect -- so the whole mosaic came out mildly
+    # squashed, identically for every tile, which is why it looked plausible.
+    # Setting the aspect to (cell width in data units) / (cell height in data
+    # units) makes the cells square in display whatever the extent is in:
+    # it reduces to 1.0 in rank space and carries the value ranges in linear
+    # mode, where x and y are on completely different scales.
+    cell_w = (extent[1] - extent[0]) / ncol
+    cell_h = (extent[3] - extent[2]) / nrow
+    ax.imshow(canvas, cmap=cmap, vmin=0, vmax=1, aspect=cell_w / cell_h,
               interpolation="nearest", extent=extent, origin="upper")
     for e in xgrid:
         ax.axvline(e, color="white", lw=0.5, alpha=0.55)

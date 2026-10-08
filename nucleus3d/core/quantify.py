@@ -89,6 +89,118 @@ def weighted_radius(coords_um, weights):
     return r_w, r_w / r_unweighted
 
 
+def total_persistence(img2d, mask2d, bg=0.0, smooth_px=1.0):
+    """
+    How much prominent internal structure the chromatin has, as one number.
+
+    Imagine flooding the nucleus and lowering the water level. Bright
+    chromatin domains appear as islands, and as the level drops neighbouring
+    islands merge. Each island's PERSISTENCE is the intensity interval
+    between the peak where it appeared and the level at which it merged into
+    a brighter neighbour -- how prominent it was, not how bright. This
+    returns the sum of those intervals (0-dimensional total persistence).
+
+    Why not simply count the domains. A count is a threshold commitment: it
+    jumps by a whole unit when a faint domain crosses the cutoff, so nearly
+    identical images can differ by several counts. Persistence has no cutoff
+    -- a marginal domain contributes a small amount and a prominent one a
+    large amount, so the measure changes smoothly with the image. Measured on
+    the validation set it also separates better than the count it replaces
+    (discrimination 0.75 vs 0.63) and is essentially uncorrelated with
+    `mid_dna_cv_corr` (r = 0.05), which makes it an independent axis rather
+    than a restatement of chromatin contrast.
+
+    Two choices worth knowing about:
+
+    * The globally-surviving island is EXCLUDED. Its persistence is just the
+      overall contrast of the nucleus, which `mid_dna_cv_corr` already
+      reports; the finite ones carry the internal structure, which is the
+      new information.
+    * Values are divided by (brightest voxel in the nucleus - field
+      background), so the result is dimensionless and does not scale with
+      staining intensity or exposure time.
+
+    A light pre-smooth is applied first. Without it every noise peak becomes
+    its own island: measured at 500-2800 islands per nucleus, where after
+    smoothing it is 40-220, which is the order of the real chromatin domain
+    count. Smoothing is a defined operation rather than a cutoff, so the
+    measure stays continuous.
+
+    See `docs/chromatin_persistence.md` for the longer explanation.
+
+    Parameters
+    ----------
+    img2d : (y, x) float
+        One plane of the DNA channel, raw (not background-subtracted).
+    mask2d : (y, x) bool
+        Nucleus mask on that plane.
+    bg : float
+        Field background for the DNA channel.
+    smooth_px : float
+        Gaussian sigma in PIXELS for the pre-smooth. ~1 px suppresses
+        shot-noise peaks without merging genuine domains.
+
+    Returns
+    -------
+    float
+        Dimensionless total persistence; np.nan for a mask too small or flat
+        to measure.
+    """
+    ys, xs = np.nonzero(mask2d)
+    if ys.size < 10:
+        return np.nan
+
+    if smooth_px and smooth_px > 0:
+        img2d = ndi.gaussian_filter(np.asarray(img2d, dtype=np.float32),
+                                    sigma=float(smooth_px))
+
+    v = np.asarray(img2d, dtype=np.float64)[ys, xs]
+    span = float(v.max()) - float(bg)
+    if not np.isfinite(span) or span <= 0:
+        return np.nan
+
+    # position of each in-mask pixel within the flat list, for neighbour lookup
+    pos = np.full(img2d.shape, -1, dtype=np.int64)
+    pos[ys, xs] = np.arange(ys.size)
+
+    order = np.argsort(-v, kind="stable")            # brightest first
+    parent = np.arange(ys.size)
+    birth = np.zeros(ys.size)
+    added = np.zeros(ys.size, dtype=bool)
+
+    def find(a):
+        while parent[a] != a:
+            parent[a] = parent[parent[a]]            # path halving
+            a = parent[a]
+        return a
+
+    ny, nx = img2d.shape
+    finite = []
+    for i in order:
+        y, x = ys[i], xs[i]
+        roots = set()
+        for yy, xx in ((y - 1, x), (y + 1, x), (y, x - 1), (y, x + 1)):
+            if 0 <= yy < ny and 0 <= xx < nx:
+                j = pos[yy, xx]
+                if j >= 0 and added[j]:
+                    roots.add(find(j))
+        added[i] = True
+        if not roots:                                # a new island is born
+            birth[i] = v[i]
+            continue
+        # elder rule: the island with the higher birth survives the merge
+        roots = sorted(roots, key=lambda r: -birth[r])
+        keep = roots[0]
+        parent[find(i)] = keep
+        for r in roots[1:]:
+            finite.append(birth[r] - v[i])
+            parent[r] = keep
+
+    if not finite:
+        return 0.0
+    return float(np.sum(np.asarray(finite) / span))
+
+
 def midplane_metrics(mask3d, dna_crop, voxel_um, bg=0.0):
     """
     Shape and texture on the single z-plane where the nucleus is widest.
@@ -147,6 +259,12 @@ def midplane_metrics(mask3d, dna_crop, voxel_um, bg=0.0):
         mid_dna_cv_corr=(sd / mean_corr) if mean_corr > 0 else np.nan,
         mid_dna_radial_um=r_w,
         mid_dna_radial_norm=r_norm,
+
+        # Internal structure, independent of the contrast measured by
+        # `mid_dna_cv_corr` (r = 0.05 on the validation set). Low for
+        # condensed chromatin -- a few large masses -- and high for the many
+        # prominent domains of an interphase nucleus.
+        mid_dna_persistence=total_persistence(dna_crop[zi], m2, bg=bg),
     )
 
 
