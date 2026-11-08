@@ -8,7 +8,7 @@ The work is **two steps that meet at one file**:
 
 ```
  .nd2 z-stacks ──┐
-                 │  step 1   scripts/run_segmentation.py      hours
+                 │  step 1   scripts/run_segmentation.py   ~17 min/file
                  └─────────> nuclei_measurements.csv  ──┐
                              (+ optional per-nucleus     │
                               substacks, see below)      │
@@ -17,17 +17,121 @@ The work is **two steps that meet at one file**:
                                                          └─────────> figures   seconds
 ```
 
-Step 1 needs the image data and a lot of RAM; step 2 needs only the table
+(Measured on one file of the example data, 24 fields on one worker; a full
+six-file dataset is an afternoon.) Step 1 needs the image data and a lot of
+RAM; step 2 needs only the table
 (except the image mosaics, which re-read crops). Splitting them means a
 long segmentation run happens once, and the analysis can then be iterated
 in seconds -- on a different machine if you like.
 
-A second, optional pipeline sits alongside these: `antenna3d` traces nuclear
-F-actin antennas and returns one graph per nucleus. It does not segment
-nuclei — it reads step 1's label volumes and joins on `nucleus_uid`. It is
-documented on its own in [`docs/antenna3d.md`](docs/antenna3d.md), and it is
-not part of the path above; see [the second
-pipeline](#the-second-pipeline-antennas).
+## Quick Start
+
+Five steps, about half an hour of which 25 minutes are the computer's
+downloading and segmenting, and you end with a folder of figures made from
+published data. Every command below was run as written, and every number is
+what that run produced; the rest of this README explains what you just did.
+
+**1 — Get the code and install it.** [`uv`](https://docs.astral.sh/uv/getting-started/installation/)
+manages the Python environment for you; a Conda alternative is in [Install](#install).
+
+```bash
+git clone https://github.com/lhilbert/Nuclei-And-Inside.git
+cd Nuclei-And-Inside
+uv sync --extra test
+uv run pytest
+```
+
+Expect `128 passed, 1 skipped, 1 warning`. The skip needs a real `.nd2` file
+and is normal. Every command from here on starts with `uv run` — that is what
+makes it use the environment `uv sync` just built.
+
+**2 — Get one file of example data** (2.4 GB, about 5 minutes on a fast
+connection; CC-BY, the dataset behind the published figures):
+
+```bash
+mkdir -p data/Control
+curl -L -o data/Control/SetC_Control_004_crop.nd2 \
+  "https://zenodo.org/records/5242952/files/SetC_Control_004_crop.nd2?download=1"
+```
+
+Use `-o` with the file name as written: plain `curl -O` on this URL saves a
+file called `content`. The record holds six files of 2.4–3.0 GB — one is
+enough to start. The `Control` subfolder is not decoration: subfolder names
+become the `condition` column later.
+
+**3 — Look at the channels before committing to a run.** Two seconds, and it
+prevents the most expensive mistake in the pipeline:
+
+```bash
+uv run python -c "from nucleus3d import describe_file; print(describe_file('data/Control/SetC_Control_004_crop.nd2'))"
+```
+
+This file reports channels `DAPI`, `Cy5` and `mCherry`, 24 positions, 31
+planes. **`DAPI` is the DNA channel here** — the other two are Pol II stains
+filed under their filter names. Channel names elsewhere can lie outright; see
+[Things that will bite you](#things-that-will-bite-you).
+
+**4 — Images → table** (~17 minutes for this file on one worker):
+
+```bash
+cp scripts/run_segmentation.py my_experiment.py
+```
+
+Edit three lines in the `SETTINGS` block of `my_experiment.py` —
+`INPUT_DIR = "data"`, `DNA_CHANNEL = "DAPI"`, `OUTPUT_DIR = "results"` — and run it:
+
+```bash
+uv run python my_experiment.py
+```
+
+You get `results/nuclei_measurements.csv` (137 nuclei over 24 positions for
+this file), one QC figure per field in `results/qc/`, and the label volumes in
+`results/labels/`. The run ends by naming the fields with the most unsegmented
+DNA — here `p21` (0.197), `p17` (0.172), `p15` (0.152). Open
+`results/qc/SetC_Control_004_crop_p21_qc.png` and read it against
+[Reading the QC figure](#reading-the-qc-figure) before trusting the table.
+
+**5 — Table → figures** (~10 seconds):
+
+```bash
+cp scripts/run_analysis.py my_analysis.py
+```
+
+Set `RESULTS_DIR = "results"` and `N_Z = 31` in its `SETTINGS` block, then:
+
+```bash
+uv run python my_analysis.py
+```
+
+Seven figures and `pca_scores.csv` land in `results/figures/`. Start with
+`zclip_diagnostics.png`, then `midplane_scatter.png`. On this one file, 34 of
+the 137 nuclei survive the two default filters — half are clipped at a slab
+face, and many of the rest touch the image edge — and PC1 carries 44% of the
+variance.
+
+**What you should not conclude from this.** One file of untreated cells is a
+working installation, not an experiment: there is nothing to compare
+conditions against, the angular pseudo-time coordinate has no loop to ride in
+data this homogeneous, and none of the numbers above match the published ones,
+which come from all six files. Download the rest into
+`data/<condition>/` subfolders when you want the real comparison.
+
+## Where to go after the Quick Start
+
+The rest of this document is long because it records what the pipeline
+measures and why. You do not need most of it on your first day. Find the line
+that matches what you are actually doing:
+
+| If you want to… | Read, in this order |
+|---|---|
+| understand what the Quick Start just did | [Step 1](#step-1--from-images-to-tables), [Reading the QC figure](#reading-the-qc-figure), [Step 2](#step-2--from-tables-to-figures) |
+| make figures from a table somebody handed you | [Install](#install), [Step 2](#step-2--from-tables-to-figures), [the column dictionary](#the-measurement-table-column-by-column) |
+| process your own `.nd2` images | [Install](#install), [Step 1](#step-1--from-images-to-tables), [Reading the QC figure](#reading-the-qc-figure) |
+| trace F-actin antennas inside nuclei | [Install](#install), then [Step 1](#step-1--from-images-to-tables) — the antenna pipeline reads the label volumes step 1 writes — then [`docs/antenna3d.md`](docs/antenna3d.md). Your data needs an F-actin channel: check with `describe_file` before starting |
+
+Everything after Step 2 — the measurement definitions, what the example data
+taught us, and the list of things that will bite you — is reference material.
+Come back to it when a number looks wrong, not before.
 
 ## New to Git and GitHub?
 
@@ -52,12 +156,15 @@ Questions are welcome — open an issue rather than getting stuck.
 
 ## Install
 
-To manage Python dependencies for a single project (think: additional functions
-needed only for this project), it is highly recommended that you use a virtual
-environment manager.
+A **virtual environment** is a private folder of Python packages belonging to
+this project alone: installing something for this project cannot break another
+project on your computer, and the exact versions used here are recorded. You
+do not have to understand it beyond that — the commands below create and fill
+one for you.
 
-Below are the commands for either `uv` or Conda. Both work — you only need one.
-We recommend `uv`.
+**Use Option A unless you have a reason not to.** Option B exists for groups
+that already standardise on Conda, and for platforms where pip-installing a
+dependency is awkward. You need one of them, not both.
 
 ### Option A — uv (recommended)
 
@@ -71,7 +178,13 @@ cd Nuclei-And-Inside
 uv sync
 ```
 
-`uv sync` installs the package in editable mode and records the resolved dependency versions in `uv.lock`, so everyone working on the project gets an identical environment.
+**If somebody already handed you the project folder**, skip the first two
+lines: `cd` into it and run `uv sync` there.
+
+`uv sync` installs the package in editable mode — your edits to the code take
+effect immediately, with no reinstall, which you do not need to care about on
+day one — and records the resolved dependency versions in `uv.lock`, so
+everyone working on the project gets an identical environment.
 
 You do not need to activate anything — prefix commands with `uv run`:
 
@@ -111,18 +224,36 @@ fresh at install time and may differ from those used during development.
 
 ### Dependencies
 
+**The install step above already installed these for you** — the list is for
+reference, not something to work through:
+
 `nd2`, `numpy`, `scipy`, `scikit-image`, `pandas`, `tifffile`, `matplotlib`,
 `networkx`, `skan`
 
-`networkx` and `skan` belong to `antenna3d` alone. It also has two optional
-extras, neither of which the normal path needs — see
-[`docs/antenna3d.md`](docs/antenna3d.md#install).
+`networkx` and `skan` belong to `antenna3d` alone. Three optional extras exist
+on top, and are installed only if you name them: `test` (pytest, needed for the
+check below), `parquet` (`pyarrow`, smaller antenna tables) and `cellpose`
+(only if you let `antenna3d` segment nuclei itself instead of reading step 1's
+labels) — see [`docs/antenna3d.md`](docs/antenna3d.md#install).
 
 ### Check it worked
 
+The test suite needs `pytest`, which lives in the optional `test` extra, so
+install that first — a plain `uv sync` does not:
+
 ```bash
+uv sync --extra test
 uv run pytest
 ```
+
+On the Conda route instead: `pip install -e ".[test]"`, then `pytest`.
+
+Expect `128 passed, 1 skipped, 1 warning` (at the time of writing). The skip
+is `tests/antenna3d/test_io.py`, which needs a real `.nd2` file and runs only
+if you point `ANTENNA3D_TEST_ND2` at one; the warning is a `tifffile`
+deprecation. Both are expected. If you see
+`error: Failed to spawn: pytest`, the `--extra test` sync above is the step
+that was missed.
 
 ---
 
@@ -143,6 +274,11 @@ columns in the measurement table are Ser2P and `mCherry_*` are Ser5P. Six
 `.nd2` files, two replicate sets (C and D) crossed with the three conditions,
 each holding 24 stage positions of 31 z-planes at 100 nm spacing and 65 nm
 laterally, alongside a scan of the corresponding lab-book page.
+
+To run on it: download the six `.nd2` files from the DOI above into a folder
+of your choice, keeping one subfolder per condition, and point `INPUT_DIR` in
+your copy of `scripts/run_segmentation.py` at that folder. Nothing in the
+repository downloads it for you, and the files are large — budget the disk.
 
 
 
@@ -198,17 +334,28 @@ from nucleus3d.core.quantify import midplane_metrics   # internals
 ## Step 1 — from images to tables
 
 ```bash
-cp scripts/run_segmentation.py my_experiment.py    # optional: keep a record
-python scripts/run_segmentation.py
+cp scripts/run_segmentation.py my_experiment.py    # your copy, your settings
+# edit the SETTINGS block at the top of my_experiment.py, then:
+uv run python my_experiment.py                     # conda route: python my_experiment.py
 ```
+
+Work in a copy rather than in `scripts/run_segmentation.py` itself: the
+template stays clean for the next experiment, and your copy is the record of
+what you ran. **On the uv route every command in this README needs the
+`uv run` prefix** — a bare `python my_experiment.py` uses whatever Python your
+shell finds and fails with `ModuleNotFoundError: No module named 'nd2'`.
+
+Expect roughly **40 s per field per worker** on a recent laptop (measured: 24
+stage positions, 137 nuclei, 17 min on a single worker). A dataset of several
+files is an afternoon, which is why step 1 and step 2 are separate.
 
 Edit the `SETTINGS` block and nothing else. The three settings that matter
 most on a new dataset:
 
 | setting | why |
 |---|---|
-| `INPUT_DIR` | folder of `.nd2`, searched recursively; one subfolder per treatment gives you a `condition` column for free |
-| `DNA_CHANNEL` | **check this every time.** Folder names lie -- one example dataset is called `...JF646Hoechst...` and has no Hoechst channel at all. Run `describe_file()` first |
+| `INPUT_DIR` | folder of `.nd2`, searched recursively — **or the path of a single `.nd2` file**, which is the quickest way to try the pipeline out. One subfolder per treatment gives you a `condition` column for free; point it at a single file and there is no `condition` column at all, which step 2 handles by treating every nucleus as one group |
+| `DNA_CHANNEL` | **check this every time.** Folder names lie -- one example dataset is called `...JF646Hoechst...` and has no Hoechst channel at all. List the channels of a file with `uv run python -c "from nucleus3d import describe_file; print(describe_file('path/to/file.nd2'))"`, then pick the DNA one: it is the channel that fills whole nuclei evenly rather than showing speckles or puncta. For the public cultured-cell data it is `DAPI` |
 | `N_WORKERS` | `"auto"` sizes the pool from measured memory, not from the core count. See the parallel section |
 
 What it writes into `OUTPUT_DIR`:
@@ -220,9 +367,9 @@ What it writes into `OUTPUT_DIR`:
 | `run_parameters.json` | every setting used, plus the worker plan |
 | `qc/*.png` | per-field validation figures -- look at these before trusting the table |
 | `labels/*.tif` | per-field label volumes (see below) |
-| `field_cache/` | per-field tables for fast re-runs (see below) |
+| `field_cache/` | per-field tables for fast re-runs — **only when `SAVE_LABEL_VOLUMES = False`** (see below) |
 | `nucleus_boxes/` | per-nucleus substacks, **only if you ask for them** |
-| `failures.csv` | fields that errored, if any |
+| `failures.csv` | **only if a field errored** — absence of this file is good news |
 
 ### Label volumes
 
@@ -410,9 +557,30 @@ Five panels per field:
 1. **DNA max projection** — the raw data
 2. **Segmentation** — outlines with label IDs matching the `label` column
 3. **Unsegmented DNA** — DNA signal assigned to no nucleus, in cyan. This
-   is the missed-nucleus check; a whole cyan nucleus means a real miss
-4. **XZ side view** — how thick the slab is and how clipped the nuclei are
+   is the missed-nucleus check; a whole cyan nucleus means a real miss. The
+   blob count in its title counts leftovers larger than `min_blob_um3`
+   (default 5 µm³), which is a different and much smaller threshold than the
+   `min_volume_um3` that decides what counts as a nucleus — a field can show
+   several blobs and still be fine. Three cases to tell apart: a whole cyan
+   nucleus is a real miss; cyan speckle at the nuclear rim is halo and needs
+   nothing; a bright, compact cyan mass is usually a mitotic figure the
+   threshold left out, which is expected on cultured-cell data
+4. **XZ side view** — the slab in profile. Use it to see how thin the slab is;
+   it is too short to judge per-nucleus clipping by eye, and the
+   `mid_at_z_border` column is what answers that question properly
 5. **Size vs solidity** — outliers are merges, fragments or debris
+
+There is **one QC figure per field**, so a 24-position file gives 24 of them.
+Do not open them all: sort `field_summary.csv` by `unsegmented_fraction` and
+open the worst three.
+
+**What a good field looks like**, on the example data: `unsegmented_fraction`
+below about 0.05. The simplest rule covers the whole range — re-run any field
+whose panel 3 shows a *whole cyan nucleus*, whatever the fraction says, and
+leave the others alone. In practice that means fields above roughly 0.15 are
+nearly always worth re-running with `thresh_factor` lowered to 0.6 or 0.4,
+fields below 0.05 nearly never are, and between the two the picture decides,
+not the number.
 
 `field_summary.csv` gives the same information numerically, so you can
 sort by `unsegmented_fraction` to find the fields worth opening.
@@ -438,20 +606,45 @@ Test on a few fields first — set `POSITIONS = [0, 5, 10]` — before committin
 ## Step 2 — from tables to figures
 
 ```bash
-python scripts/run_analysis.py
+cp scripts/run_analysis.py my_analysis.py          # your copy, your settings
+# edit the SETTINGS block at the top, then:
+uv run python my_analysis.py                       # conda route: python my_analysis.py
 ```
 
-Point `RESULTS_DIR` at what step 1 wrote. Everything here reads the table
+Point `RESULTS_DIR` at the folder step 1 wrote into — the one holding
+`nuclei_measurements.csv`. If somebody handed you only the table, make a
+folder, put the table in it under that name, and point `RESULTS_DIR` there.
+The figures are written to `RESULTS_DIR/figures/`; the small snippets further
+down this section write wherever you tell them to.
+
+Three settings in that block cannot be guessed from the template, and all
+three are answerable from the table itself:
+
+```python
+import pandas as pd
+table = pd.read_csv("results/nuclei_measurements.csv")
+
+table.get("condition", pd.Series(dtype=str)).unique()
+                                 # the names to list in CONDITION_ORDER.
+                                 # Empty if step 1 ran on a single file: the
+                                 # figures then draw one panel labelled "all"
+int(table["mid_z"].max()) + 1    # N_Z, the number of z-planes
+table["source_path"].iloc[0]     # the images the mosaics re-read: if this
+                                 # path does not exist on this machine,
+                                 # set MAKE_MOSAICS = False
+``` Everything here reads the table
 only, so it runs in seconds and can be re-run as often as you like -- with
 one exception: the mosaics re-read mid-plane crops from the `.nd2` files,
 so set `MAKE_MOSAICS = False` if the image data is not reachable.
 
-Every figure function drops two groups of nuclei by default, and both
+Every **figure** function drops two groups of nuclei by default, and both
 matter more than they sound -- nuclei whose widest plane is a slab face
 (`mid_at_z_border`) and nuclei touching an image edge in xy
 (`touches_xy_border`). On the example data that leaves 241 of 797. The
 `feature_pca` fit applies the same two filters, so the PCA and the scatter
-describe the same population.
+describe the same population. The coordinate helpers are the exception:
+`angular_pseudotime` takes the table exactly as you give it, so filter it
+yourself first if you want the same population as the figures.
 
 ### Check the slab first: `zclip_diagnostics`
 
@@ -462,7 +655,12 @@ zclip_diagnostics(table, "results/zclip_diagnostics.png")
 
 Three panels: where each nucleus's widest plane sits in the stack, the
 percentage of each condition clipped at a slab face, and whether being
-clipped biases the measurements. It excludes xy-border nuclei by default,
+clipped biases the measurements. **Panel 3 plots every nucleus**, as two
+coloured clouds per measurement — inside-slab in blue, z-clipped in orange —
+with a black bar at each group's median. The y-axis is each value divided by
+the median of the unclipped group, so that group sits on the dotted 1.0 line
+by construction, and the ratio quoted below is the distance between the two
+black bars. A cloud, not a bar chart. It excludes xy-border nuclei by default,
 so it measures the z effect alone rather than a mixture of the two
 truncations. On the full example dataset (196 fields, 475 xy-interior
 nuclei of 797):
@@ -471,7 +669,11 @@ nuclei of 797):
 |---|---|
 | widest plane at a slab face | 234 of 475 interior nuclei (49%) |
 | clipping rate by condition | Flavopiridol 44%, Triptolide 46%, Embryo sphere 47%, Control 57% |
-| clipped ÷ unclipped median | mid-plane area **0.92** (p = 7e-04), CV 1.05 (p = 0.12), solidity 1.00 (p = 0.19), radial index 1.00 (p = 0.12) |
+| clipped ÷ unclipped median | mid-plane area (`max_area_um2`) **0.92** (p = 7e-04), CV (`mid_dna_cv_corr`) 1.05 (p = 0.12), solidity (`mid_solidity`) 1.00 (p = 0.19), radial index (`mid_dna_radial_norm`) 1.00 (p = 0.12) |
+
+Those are the example dataset's numbers, from 475 nuclei across 196 fields. A
+single field of 100–150 nuclei will not reproduce them and is not meant to —
+the only values to act on are the ones your own run prints.
 
 **Only mid-plane area is biased, and modestly.** Clipped nuclei measure 8%
 smaller, which is what a grazing cut through the nuclear cap should do. CV,
@@ -513,21 +715,72 @@ pairs. `scripts/run_analysis.py` writes it automatically.
 ### An angular pseudo-time coordinate: `angular_pseudotime`
 
 ```python
+import pandas as pd
 from nucleus3d.analysis import angular_pseudotime, pseudotime_geometry
+
+table = pd.read_csv("results/nuclei_measurements.csv")
 
 pseudo, params = angular_pseudotime(
     table, centre=(1.5, -0.5), pi_toward=(3.5, -1.2),
     x="mid_dna_cv_corr", y="mid_dna_persistence", direction="cw")
-pseudotime_geometry(pseudo, "results/pseudotime_geometry.png", params,
-                    highlight=pseudo.phase.eq("prometaphase"))
+pseudotime_geometry(pseudo, "results/pseudotime_geometry.png", params)
 ```
+
+`centre` and `pi_toward` are **not** numbers to copy from here — they belong to
+the example data's plane. Get your own by plotting the two columns first,
+z-scored, and reading two points off that plot by eye: the hole in the middle
+of the loop is `centre`, and any point in the direction you want θ = π to lie
+in is `pi_toward`.
+
+**If your table has no `mid_dna_persistence`**, the honest options are to
+re-run step 1 or to leave the coordinate alone. Substituting another
+mid-plane column will produce angles — `atan2` always does — but they are not
+this coordinate, and the substitute columns in this table are largely
+restatements of chromatin contrast, so the plane collapses toward a line
+instead of a loop. Before computing any angle, plot the two z-scored columns
+and look for the hole in the middle: **no hole, no coordinate.** If you
+publish a substitute, say which columns you used.
+
+**θ orders the nuclei along the loop; it does not know which way time runs.**
+Direction comes from you, through `direction` and `pi_toward`, anchored on
+phases you can recognise. A tidy-looking calendar is not evidence that the
+ordering is right — the radius check below is, and it overrules the picture.
+
+The call above is deliberately written without `highlight=`. The published
+figures highlight a known phase, as in `highlight=pseudo.phase.eq("prometaphase")`
+— but **`phase` is not a column the pipeline produces.** It is a label somebody
+typed in by hand after looking at the nuclei. Omit `highlight=` if you have no
+such labels.
+
+**This coordinate needs data that spans the cell cycle.** The loop is traced
+by nuclei at every stage of condensation, so a dataset of interphase nuclei —
+one control field, say — has no loop to find and no angle to measure, however
+many nuclei it holds. The example data earns its ring from the condensed and
+mitotic figures scattered through it. Check the plane before you reach for the
+coordinate:
+
+```python
+import matplotlib.pyplot as plt
+filt = table[~table["mid_at_z_border"] & ~table["touches_xy_border"]]
+z = lambda c: (filt[c] - filt[c].mean()) / filt[c].std()   # z-scored: mean 0,
+fig, ax = plt.subplots()                                   # SD 1, so the two
+ax.scatter(z("mid_dna_cv_corr"), z("mid_dna_persistence"), s=8)  # axes compare
+fig.savefig("results/plane.png", dpi=150)
+```
+
+Filter first: the figure functions drop z-clipped and edge nuclei for you, this
+plot does not. If what comes out is a blob, stop — the coordinate is not
+available for this dataset, and that is a finding worth writing down rather
+than a step to work around.
 
 The cell cycle is closed, so two metrics that track it should trace a loop.
 Place a centre inside that loop and each nucleus's angle about it orders the
-cells — the construction `tricycle` and Revelio use on cell-cycle gene
-expression, here on chromatin morphology. `centre` is read off a plot of the
-plane, `pi_toward` fixes where θ = 0 sits, and `direction` chooses which way
-θ advances. Both coordinates come back as columns: `theta` and `radius`.
+cells — the construction `tricycle` ([Zheng et al. 2022](https://doi.org/10.1186/s13059-021-02581-y))
+and Revelio ([Schwabe et al. 2020](https://doi.org/10.15252/msb.20209946)) use
+on cell-cycle gene expression, here on chromatin morphology instead. `centre` is read off a plot of the
+plane, `pi_toward` is a point that θ = π points towards from the centre (it
+fixes the otherwise arbitrary origin of the coordinate), and `direction`
+chooses which way θ advances. Both coordinates come back as columns: `theta` and `radius`.
 
 Pick the centre from the **standardised** plane. `atan2` mixes the two axes,
 so without z-scoring the angle is a read-out of whichever column carries
@@ -543,6 +796,12 @@ validation data; the circular mean showed it separates condensed from
 interphase at p = 5 × 10⁻⁹. Use `circular_mean` and `circular_R` from the
 same module, never `mean`, `median` or `std`.
 
+`pseudotime_geometry` is how you look: it draws the plane with each nucleus
+coloured by its θ, the centre marked and the θ = π ray drawn from it. A usable
+one shows colour sweeping once around the centre with nuclei at a comparable
+distance all the way round; a bad one crowds every colour into a narrow fan,
+or puts the centre outside the cloud entirely.
+
 **Check it is a ring before trusting it.** An angle exists whether or not
 the geometry supports one; for a blob it is noise with units. A ring puts
 nuclei at a comparable radius all the way round. On the example data the
@@ -557,10 +816,29 @@ you need the two told apart, the discriminator has to come from somewhere
 else — the number of separating masses, or the Pol II channels, since
 transcription stops through mitosis and restarts in telophase.
 
-`phase_order_check` is the validation to run. If labels were used only to
-orient the coordinate, their ordering along θ is a free prediction.
+`phase_order_check` is the validation to run, and it needs the same hand-typed
+`phase` labels:
+
+```python
+from nucleus3d.analysis import phase_order_check
+
+check = phase_order_check(pseudo, "phase",
+                          order=["interphase", "prophase", "prometaphase",
+                                 "metaphase", "anaphase", "telophase"])
+```
+
+It returns one row per labelled phase with the circular mean θ, the
+concentration `R` (0 = scattered all round the circle, 1 = all at one angle)
+and the count — plus whether the means increase in the order you gave. If
+labels were used only to orient the coordinate, their ordering along θ is a
+free prediction, and a violation is informative. Two nuclei cannot establish
+an ordering: read the counts before the verdict.
 
 ### The calendar layout
+
+Size the grid to your table: `grid=(rows, cols)` should multiply out to roughly
+the number of nuclei you are laying out, so the 8 × 12 of the published figure
+assumes ~96 of them and a smaller table leaves most of the page empty.
 
 `nucleus_mosaic` in `sort_by` mode lays the nuclei out in reading order,
 which turns the coordinate into a page of images:
@@ -742,6 +1020,16 @@ them. PC2 and PC3 are nearly free of the split (1.5% and 4.9%).
 ## The measurement table, column by column
 
 Reference for `nuclei_measurements.csv`: one row per nucleus, ~54 columns.
+
+**Before debugging anything else, check your table is the right shape.** A
+current table has one row per nucleus and at least these columns:
+`nucleus_uid`, `file`, `position`, `label`, `volume_um3`, `max_area_um2`,
+`solidity`, `touches_xy_border`, `mid_z`, `mid_at_z_border`, `mid_solidity`,
+`mid_dna_cv_corr`, `mid_dna_persistence`, `dna_radial_norm`, plus one family
+of intensity columns per channel. A table written before a given measurement
+existed simply lacks that column — `mid_dna_persistence` is the recent one —
+and the figure that needs it fails with a plain `KeyError`. The fix is to
+re-run step 1, not to edit the figure code.
 The families are geometry (from `core/segment.py`), per-channel intensity,
 chromatin texture, radial distribution, and the mid-plane read-out. Two
 columns are flags you should almost always filter on —
@@ -775,13 +1063,16 @@ For each channel `<C>`: `<C>_median`, `<C>_mean`, `<C>_p90`, `<C>_std`
 **Use `<C>_integrated_corr` when comparing nuclei of different sizes** —
 it is the background-subtracted sum over the nucleus in intensity·µm³, so it scales with total molecule number rather than concentration.
 
-Chromatin texture on the DNA channel: `dna_cv`, `dna_p90_p50`,
-`dna_p90_p10`, `dna_top10_fraction`. Mitotic figures score high on all four (`dna_cv` ≈ 0.4 versus ≈ 0.2 for interphase).
+Chromatin texture on the DNA channel: `dna_cv` — the coefficient of
+variation, i.e. the standard deviation of DNA intensity inside the mask
+divided by its mean, so a bigger number means a patchier nucleus — together
+with `dna_p90_p50`, `dna_p90_p10` and `dna_top10_fraction`. Mitotic figures score high on all four (`dna_cv` ≈ 0.4 versus ≈ 0.2 for interphase).
 
 ### Radial distribution columns
 
 `dna_radial_um` is the intensity-weighted mean radius: for every voxel in
-the nucleus, its distance from the mask centre weighted by the
+the nucleus, its distance from the **geometric centre of the mask** (the
+centroid of the shape, not of the intensity) weighted by the
 background-subtracted DNA intensity there, summed and normalised by total
 intensity. `dna_radial_norm` divides that by the *unweighted* mean radius
 of the same mask, which is the form to compare between nuclei — it is
@@ -793,6 +1084,10 @@ dimensionless and independent of nucleus size:
 | > 1.0 | signal pushed toward the nuclear rim |
 | < 1.0 | signal concentrated centrally |
 
+In practice interphase nuclei in this data sit close to 1.0 — roughly 0.9 to
+1.1. A column of values far outside that range usually means the wrong
+channel, not unusual biology.
+
 Negative weights (a few dim voxels after background subtraction) are
 clipped to zero; without that they would pull the intensity centroid the
 wrong way.
@@ -800,7 +1095,9 @@ wrong way.
 ### Mid-plane columns — the 2D read-out
 
 `mid_*` columns describe the single z-plane where each nucleus is widest,
-rather than an average over the stack: `mid_z`, `max_area_um2`,
+rather than an average over the stack: `mid_z`, `max_area_um2` (the area of
+that widest plane — it is the one mid-plane measurement without a `mid_`
+prefix, and it is what "mid-plane area" means elsewhere in this README),
 `mid_solidity`, `mid_dna_cv`, `mid_dna_cv_corr`, `mid_dna_radial_um`,
 `mid_dna_radial_norm`, `mid_dna_persistence`, `mid_at_z_border`.
 

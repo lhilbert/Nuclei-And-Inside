@@ -86,11 +86,30 @@ There is no public example dataset for this assay yet. `pytest` runs with no dat
 
 ## Use
 
+**Before you start, three things about your data decide whether this pipeline
+can run at all:**
+
+1. **An F-actin channel.** This package traces F-actin antennas. If your
+   dataset has no actin stain, nothing here applies to it — step 1 below
+   prints your channels, and if none of them is an actin reporter, stop there.
+2. **Nucleus label volumes.** `antenna3d` does not segment nuclei. The
+   intended path is to hand it the `labels/*.tif` volumes that
+   `nucleus3d` step 1 writes (see [the main README](../README.md#step-1--from-images-to-tables)),
+   and point `LABELS_DIR` at that folder. Without it the run falls back to
+   `cellpose`, an optional extra most installs do not have, and **every field
+   fails** with a message about cellpose rather than about the missing labels.
+3. **The same fields in both runs.** If you limited `POSITIONS` in the
+   segmentation run, limit the antenna run to the same ones — every field
+   without a label volume is recorded as a failure.
+
+On the `uv` route, every command below needs the `uv run` prefix shown; on the
+Conda route, drop it.
+
 **1. Check your channels and your voxel size first.** Two seconds, and it prevents the two most
 expensive mistakes in the pipeline:
 
 ```bash
-python -c "from antenna3d import describe_file; print(describe_file('yourfile.nd2'))"
+uv run python -c "from antenna3d import describe_file; print(describe_file('yourfile.nd2'))"
 ```
 
 ```
@@ -106,12 +125,20 @@ python -c "from antenna3d import describe_file; print(describe_file('yourfile.nd
       2  'RFP'  632 nm
 ```
 
-**2. Copy `scripts/run_antennas.py`**, edit the `SETTINGS` block — input folder, output folder, the two
-channel **names**, the voxel size, the PSF, and `LABELS_DIR` — and run it:
+**2. Copy `scripts/run_antennas.py` to the repository root as `run_antennas.py`**
+— that exact name, because the acceptance test in step 4 imports its settings
+by it — then edit the `SETTINGS` block: input folder, output folder, the two
+channel **names**, the voxel size, the PSF, and `LABELS_DIR` pointing at
+step 1's `labels/` folder. Then run it:
 
 ```bash
-python scripts/run_antennas.py
+cp scripts/run_antennas.py run_antennas.py
+# edit the SETTINGS block, then:
+uv run python run_antennas.py
 ```
+
+`FIELDS` takes `.nd2` file stems without the position suffix, e.g.
+`["SetC_Control_004_crop"]`, and limits the run to those files.
 
 Put files in per-treatment subfolders of the input folder and a `condition` column appears,
 named after the subfolder.
@@ -119,13 +146,22 @@ named after the subfolder.
 **3. Look at the QC figures** in `<output>/qc/` before you use the table. Not optional here —
 see "Reading the QC figure".
 
-**4. If you have a probe-absent control, run the acceptance test** — it is the only check here
-that distinguishes a working detector from a confidently broken one, and on the data these
-defaults come from it **fails**. See *Things that will bite you*.
+**4. OPTIONAL — only if your dataset has both a probe-present and a
+probe-absent condition.** With one condition there is nothing for this test to
+compare and it will not give you a verdict. If you do have the control, run
+it: it is the only check here that distinguishes a working detector from a
+confidently broken one, and on the data these defaults come from it **fails**.
+See *Things that will bite you*.
 
 ```bash
-python run_acceptance.py
+uv run python scripts/run_acceptance.py
 ```
+
+It reads `OUTPUT_DIR` and `PARAMS` by importing `run_antennas` — the copy you
+made in step 2, in the repository root. If your copy is named anything else,
+the import silently picks up the untouched template and the test runs against
+the template's settings rather than yours. It also needs
+`keep_work="small"` or `"full"` to have been set in that copy.
 
 To script something custom, import the package and skip the template:
 
