@@ -35,7 +35,7 @@ parquet = ["pyarrow"]
 test = ["pytest"]
 
 [tool.setuptools.packages.find]
-include = ["nucleus3d*", "antenna3d*"]
+include = ["nucleus3d*", "antenna3d*", "spots3d*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
